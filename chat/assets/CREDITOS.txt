@@ -1,0 +1,13 @@
+Garlic LLM
+
+Modelos de lenguaje: Qwen3.5-9B y Qwen3.5-4B (Alibaba Qwen), licencia Apache 2.0.
+Voz a texto: Parakeet TDT 0.6B v3, NVIDIA (https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3),
+             licencia CC-BY 4.0. Pesos cuantizados a 4 bits.
+Emoji: Twemoji 16.0.1, Copyright 2019 Twitter, Inc. y otros colaboradores,
+       https://github.com/jdecked/twemoji, licencia CC-BY 4.0
+       (https://creativecommons.org/licenses/by/4.0/). Imágenes escaladas.
+Fuentes: Selawik (Microsoft), Noto Sans, Noto Sans Symbols / Symbols 2 / Math, Noto Music, Noto Sans SC y KR,
+         Arimo, Inconsolata, Cascadia Mono (Microsoft): SIL Open Font License 1.1; DejaVu Sans: licencia de
+         Bitstream Vera y dominio público. Convertidas a mapas de bits. Avisos de copyright y textos de las
+         licencias en LICENCIAS_FUENTES.txt.
+Logotipo e icono: dibujados para Garlic LLM (pc/make_brand.py).

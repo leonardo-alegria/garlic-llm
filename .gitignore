@@ -1,0 +1,11 @@
+# build output
+build/
+__pycache__/
+*.pyc
+shaders/*.o
+
+# tools and data that are downloaded, not part of the repository
+toolchain/
+models/
+third_party/
+pc/fonts_libres/
