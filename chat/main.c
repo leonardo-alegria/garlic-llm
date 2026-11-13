@@ -24,6 +24,10 @@
 #include <orbis/VideoOut.h>
 #include <orbis/libkernel.h>
 
+#include <time.h>
+
+#include "api.h"
+#include "api_proto.h"
 #include "engine.h"
 #include "tokenizer.h"
 #include "pyrun.h"
@@ -1779,6 +1783,8 @@ static void boot_report(void) {
 }
 
 
+#include "api_run.inc"   // the OpenAI-compatible API's jobs on the model (api.c serves the requests)
+
 int main(void) {
     if (rename(LOG_FILE, LOG_PREV)) unlink(LOG_FILE);   // the last log of this app is kept, as LOG_PREV
     say("starting");
@@ -1840,10 +1846,17 @@ int main(void) {
     say("voice %s; system RAM free: %u MiB", tts_ready ? "ready" : "not available", (unsigned)(flex1 >> 20));
     view.temperature = 0.7f;
     think_config();
+    api_set_model(MODEL_NAME);
+    api_start();   // OpenAI-compatible API on port 8080 (api.h); its jobs run in the loop below
 
     uint32_t prev = 0;
     int scroll_held = 0;
     for (;;) {
+        ApiJob* api_job_now = !generating && !in_voice_mode ? api_take() : NULL;
+        if (api_job_now) {   // an API request: the model answers it now, the chat waits
+            api_job(api_job_now);
+            api_done(api_job_now);
+        }
         uint32_t buttons = read_buttons();
         uint32_t pressed = buttons & ~prev;
         prev = buttons;

@@ -37,7 +37,7 @@ MP_SOURCES = sorted([*(MP / "py").glob("*.c"), *(MP / "extmod").glob("*.c"), *(M
 MP_FLAGS = [f"-I{ROOT / 'chat' / 'py'}", f"-I{MP}", "-DNDEBUG", "-std=gnu99", "-fno-strict-aliasing",
             "-Wno-unused-function", "-Wno-unused-variable", "-Wno-unused-but-set-variable"]
 LIBS = ["-lc", "-lm", "-lkernel", "-lSceGnmDriver", "-lSceVideoOut", "-lScePad", "-lSceUserService", "-lSceSysmodule",
-        "-lSceImeDialog", "-lSceCommonDialog", "-lSceAudioIn", "-lSceAudioOut", "-lSceSystemService"]
+        "-lSceImeDialog", "-lSceCommonDialog", "-lSceAudioIn", "-lSceAudioOut", "-lSceSystemService", "-lSceNet"]
 
 
 def compile_all():
@@ -103,7 +103,7 @@ def main():
     elf = OUT / "ps4ai.elf"
     b.run([b.ZIG, "ld.lld", "-m", "elf_x86_64", "-pie", "--script", b.OO / "link.x", "--eh-frame-hdr", *objs,
            "-L", b.OO / "lib", *LIBS, b.OO / "lib" / "crt1.o", "-o", elf])
-    b.run([b.BIN / "create-fself.exe", f"-in={elf}", f"-out={OUT / 'ps4ai.oelf'}", f"--eboot={PKGDIR / 'eboot.bin'}",
+    b.run([b.BIN / f"create-fself{b.EXE}", f"-in={elf}", f"-out={OUT / 'ps4ai.oelf'}", f"--eboot={PKGDIR / 'eboot.bin'}",
            "--paid", "0x3800000000000011"])
     sample = b.OO / "samples" / "hello_world"
     shutil.copy(sample / "sce_sys" / "about" / "right.sprx", PKGDIR / "sce_sys" / "about")
@@ -124,7 +124,7 @@ def main():
     files += [p.relative_to(PKGDIR).as_posix() for p in sorted((PKGDIR / "assets").rglob("*")) if p.is_file()]
     if FULL:
         files += [f"models/{name}" for name in FULL_MODELS]
-    b.run([b.BIN / "create-gp4.exe", "-out", "pkg.gp4", f"--content-id={CONTENT_ID}", "--files", " ".join(files)],
+    b.run([b.BIN / f"create-gp4{b.EXE}", "-out", "pkg.gp4", f"--content-id={CONTENT_ID}", "--files", " ".join(files)],
           cwd=PKGDIR)
     fix_gp4_dirs()
     b.pkgtool("pkg_build", "pkg.gp4", str(OUT))
