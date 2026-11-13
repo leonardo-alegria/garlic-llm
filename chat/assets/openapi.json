@@ -1,0 +1,259 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Garlic LLM API",
+    "version": "1.19",
+    "summary": "OpenAI-compatible chat API for Garlic LLM, running on a PlayStation 4.",
+    "description": "Garlic LLM runs Qwen3.5 on the PS4's own GPU. This API speaks the OpenAI Chat Completions protocol, so existing OpenAI client libraries work by changing the base URL to http://<console-address>:8080/v1.\n\nOne request runs at a time. While the model answers, the console's screen is busy and the conversation shown on it is replaced by the request's messages. A request sent while another one is running gets 503.\n\nReasoning is always off. Parameters the console does not implement (for example tools, logprobs, presence_penalty) are ignored. Only n = 1 is supported.",
+    "license": { "name": "MIT", "identifier": "MIT" }
+  },
+  "servers": [
+    {
+      "url": "http://{host}:8080",
+      "description": "The console on your network (its address, port 8080)",
+      "variables": {
+        "host": { "default": "192.168.1.50", "description": "The PS4's IP address" }
+      }
+    }
+  ],
+  "tags": [
+    { "name": "Chat", "description": "Chat completions" },
+    { "name": "Models", "description": "The loaded model" },
+    { "name": "System", "description": "Status and this description" }
+  ],
+  "security": [{ "bearerAuth": [] }, {}],
+  "paths": {
+    "/v1/chat/completions": {
+      "post": {
+        "tags": ["Chat"],
+        "operationId": "createChatCompletion",
+        "summary": "Create a chat completion",
+        "description": "Generates the assistant's next message from the conversation. With stream: true the reply comes as server-sent events (text/event-stream), one chat.completion.chunk per piece of text, ending with data: [DONE].",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/ChatCompletionRequest" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The completion, or the event stream when stream is true.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ChatCompletion" } },
+              "text/event-stream": { "schema": { "type": "string", "description": "data: <chat.completion.chunk JSON>, then data: [DONE]" } }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "503": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/v1/models": {
+      "get": {
+        "tags": ["Models"],
+        "operationId": "listModels",
+        "summary": "List the model",
+        "responses": {
+          "200": {
+            "description": "The model the console runs.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["object", "data"],
+                  "properties": {
+                    "object": { "type": "string", "const": "list" },
+                    "data": { "type": "array", "items": { "$ref": "#/components/schemas/Model" } }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "tags": ["System"],
+        "operationId": "health",
+        "summary": "Check that the server is up",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "The server is running.",
+            "content": {
+              "application/json": {
+                "schema": { "type": "object", "properties": { "status": { "type": "string", "const": "ok" } } }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/openapi.json": {
+      "get": {
+        "tags": ["System"],
+        "operationId": "openapiDocument",
+        "summary": "This OpenAPI document",
+        "security": [],
+        "responses": {
+          "200": { "description": "This document.", "content": { "application/json": { "schema": { "type": "object" } } } }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Only when the console has an API key (the file /data/garlic_api_key.txt). Without one, no key is needed."
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "An error.",
+        "content": {
+          "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+        }
+      }
+    },
+    "schemas": {
+      "Role": {
+        "type": "string",
+        "enum": ["system", "user", "assistant", "tool"]
+      },
+      "Message": {
+        "type": "object",
+        "required": ["role", "content"],
+        "properties": {
+          "role": { "$ref": "#/components/schemas/Role" },
+          "content": {
+            "oneOf": [
+              { "type": "string" },
+              {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["type", "text"],
+                  "properties": {
+                    "type": { "type": "string", "const": "text" },
+                    "text": { "type": "string" }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "ChatCompletionRequest": {
+        "type": "object",
+        "required": ["messages"],
+        "properties": {
+          "model": { "type": "string", "description": "Accepted and ignored: the console runs the one model it has (see GET /v1/models)." },
+          "messages": { "type": "array", "minItems": 1, "items": { "$ref": "#/components/schemas/Message" } },
+          "temperature": { "type": "number", "minimum": 0, "maximum": 2, "default": 0.7, "description": "0 = always the most likely token." },
+          "max_tokens": { "type": "integer", "minimum": 1, "maximum": 16384, "default": 512 },
+          "max_completion_tokens": { "type": "integer", "minimum": 1, "maximum": 16384, "description": "Same as max_tokens; it wins when both are given." },
+          "stream": { "type": "boolean", "default": false },
+          "seed": { "type": "integer", "minimum": 0, "description": "Makes the sampling repeatable." },
+          "n": { "type": "integer", "const": 1, "default": 1 }
+        }
+      },
+      "Usage": {
+        "type": "object",
+        "required": ["prompt_tokens", "completion_tokens", "total_tokens"],
+        "properties": {
+          "prompt_tokens": { "type": "integer" },
+          "completion_tokens": { "type": "integer" },
+          "total_tokens": { "type": "integer" }
+        }
+      },
+      "ChatCompletion": {
+        "type": "object",
+        "required": ["id", "object", "created", "model", "choices", "usage"],
+        "properties": {
+          "id": { "type": "string" },
+          "object": { "type": "string", "const": "chat.completion" },
+          "created": { "type": "integer" },
+          "model": { "type": "string" },
+          "choices": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["index", "message", "finish_reason"],
+              "properties": {
+                "index": { "type": "integer", "const": 0 },
+                "message": {
+                  "type": "object",
+                  "required": ["role", "content"],
+                  "properties": {
+                    "role": { "type": "string", "const": "assistant" },
+                    "content": { "type": "string" }
+                  }
+                },
+                "finish_reason": { "type": "string", "enum": ["stop", "length"] }
+              }
+            }
+          },
+          "usage": { "$ref": "#/components/schemas/Usage" }
+        }
+      },
+      "ChatCompletionChunk": {
+        "type": "object",
+        "required": ["id", "object", "created", "model", "choices"],
+        "properties": {
+          "id": { "type": "string" },
+          "object": { "type": "string", "const": "chat.completion.chunk" },
+          "created": { "type": "integer" },
+          "model": { "type": "string" },
+          "choices": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["index", "delta", "finish_reason"],
+              "properties": {
+                "index": { "type": "integer", "const": 0 },
+                "delta": {
+                  "type": "object",
+                  "properties": {
+                    "role": { "type": "string", "const": "assistant" },
+                    "content": { "type": "string" }
+                  }
+                },
+                "finish_reason": { "type": ["string", "null"], "enum": ["stop", "length", null] }
+              }
+            }
+          }
+        }
+      },
+      "Model": {
+        "type": "object",
+        "required": ["id", "object", "created", "owned_by"],
+        "properties": {
+          "id": { "type": "string", "example": "Qwen3.5-9B" },
+          "object": { "type": "string", "const": "model" },
+          "created": { "type": "integer" },
+          "owned_by": { "type": "string", "const": "garlic-llm" }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "required": ["error"],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": ["message", "type", "code"],
+            "properties": {
+              "message": { "type": "string" },
+              "type": { "type": "string", "enum": ["invalid_request_error", "server_error"] },
+              "code": { "type": ["string", "null"] }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -89,6 +89,22 @@ A PS4 gives homebrew no compute API and no machine-learning library, so Garlic L
 
 The app is built with the open-source [OpenOrbis](https://github.com/OpenOrbis/OpenOrbis-PS4-Toolchain) toolchain. The techniques, the measurements and the dead ends are written up in a 147-page guide, [*Nine Billion Parameters on a PS4*](https://ko-fi.com/s/5d8050b149).
 
+## API
+
+While the console runs Garlic LLM, it serves an OpenAI-compatible API on port 8080 of your network. Point any OpenAI client at it:
+
+```bash
+curl http://<console-address>:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"messages":[{"role":"user","content":"Hello"}],"max_tokens":128}'
+```
+
+- `GET /v1/models`, `POST /v1/chat/completions` (`stream: true` for server-sent events), `GET /health`.
+- The OpenAPI 3.1 description is at `GET /openapi.json` (also in [`chat/assets/openapi.json`](chat/assets/openapi.json)).
+- One request runs at a time, and the chat screen is busy while it does. The conversation on screen is replaced by the request's messages.
+- Reasoning is off. Only `n = 1` is supported; `tools`, `logprobs` and similar parameters are ignored.
+- For an API key, put it in `/data/garlic_api_key.txt` on the console. Requests then need `Authorization: Bearer <key>`. Without that file the API is open to anyone on your network.
+
 ## Build from source
 
 You only need this to change the app. The build scripts are written for Windows.
