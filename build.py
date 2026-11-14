@@ -16,9 +16,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 TOOLCHAIN = Path(os.environ.get("GARLIC_TOOLCHAIN") or ROOT / "toolchain")
 OO = TOOLCHAIN / "OpenOrbis" / "PS4Toolchain"
-ZIG = TOOLCHAIN / "zig" / "zig.exe"
-DOTNET = TOOLCHAIN / "dotnet" / "dotnet.exe"
-BIN = OO / "bin" / "windows"
+WIN = os.name == "nt"
+EXE = ".exe" if WIN else ""                       # the tools' names on Windows and on Linux
+ZIG = TOOLCHAIN / "zig" / f"zig{EXE}"
+DOTNET = TOOLCHAIN / "dotnet" / "dotnet.exe"      # Windows only: PkgTool.Core.dll runs on it there
+BIN = OO / ("bin/windows" if WIN else "bin/linux")
 BUILD = ROOT / "build"
 PKGDIR = BUILD / "pkg"
 
@@ -30,7 +32,8 @@ CFLAGS = ["-target", "x86_64-freebsd-none", "-march=btver2", "-O2", "-fPIC", "-f
           "-fno-stack-protector", "-fshort-wchar", "-nostdinc", "-isystem", str(OO / "include"), "-Wall", "-c"]
 
 
-ENV = dict(os.environ, DOTNET_ROLL_FORWARD="Major", OO_PS4_TOOLCHAIN=str(OO))
+ENV = dict(os.environ, DOTNET_ROLL_FORWARD="Major", OO_PS4_TOOLCHAIN=str(OO),
+           DOTNET_SYSTEM_GLOBALIZATION_INVARIANT="1")   # PkgTool.Core needs no ICU library (Linux)
 
 
 def run(cmd, **kw):
@@ -39,7 +42,10 @@ def run(cmd, **kw):
 
 
 def pkgtool(*args):
-    run([DOTNET, BIN / "PkgTool.Core.dll", *args], cwd=PKGDIR)
+    if WIN:
+        run([DOTNET, BIN / "PkgTool.Core.dll", *args], cwd=PKGDIR)
+    else:
+        run([BIN / "PkgTool.Core", *args], cwd=PKGDIR)
 
 
 def ps4_ftp(timeout=30):
