@@ -162,7 +162,7 @@ The scripts that made them from the original checkpoints are in `pc/`, and each 
 
 Garlic LLM is free and open source. If you want to see more of it (more consoles tested, faster kernels), you can help fund the work:
 
-- [GitHub Sponsors](https://github.com/sponsors/leonardo-alegria)
+- [PayPal](https://www.paypal.com/donate/?business=leonardoalegria2002%40gmail.com&currency_code=USD)
 - [Ko-fi](https://ko-fi.com/leonardoalegria)
 - Buy the guide, [*Nine Billion Parameters on a PS4*](https://ko-fi.com/s/5d8050b149) (PDF, pay what you want from 19 USD)
 
