@@ -28,6 +28,7 @@
 
 #include "api.h"
 #include "api_proto.h"
+#include "cluster.h"
 #include "engine.h"
 #include "tokenizer.h"
 #include "pyrun.h"
@@ -38,7 +39,8 @@
 #define IM_END eng.im_end
 #define THINK 248068u           // Qwen3.5 <think> and </think>: an empty block = answer without thinking
 #define THINK_END 248069u
-#define MODEL_NAME (eng.qwen35 ? (eng.hidden >= 4096 ? "Qwen3.5-9B" : "Qwen3.5-4B") : "Qwen3-4B")
+// The model's name on the screen and in the API: cluster.txt's name, else the shard's (pc/shard_model.py), else by shape
+#define MODEL_NAME model_name()
 #define MAX_REPLY 3000
 // One log per app (so that opening the other app does not lose this one's log), and the one before it
 #if defined(GARLIC_4B)
@@ -296,6 +298,12 @@ static uint32_t read_buttons(void) {
 // ---- state -------------------------------------------------------------------------------------------------------
 
 static Engine eng;
+
+static const char* model_name(void) {
+    if (cluster_name()[0]) return cluster_name();
+    if (eng.shard_name[0]) return eng.shard_name;
+    return eng.qwen35 ? (eng.hidden >= 4096 ? "Abliterated Qwen3.5-9B" : "Qwen3.5-4B") : "Qwen3-4B";
+}
 static Tokenizer tok;
 static ChatView view;
 static int pos, generating, need_close, reply_tokens, user_id;
@@ -489,6 +497,9 @@ static void loading(void* user, float frac, const char* what) {
     draw_loading(frac, user ? (const char*)user : what);
     present();
 }
+
+// The cluster's progress lines (cluster.c) on the loading screen.
+static void cluster_status(const char* line) { loading((void*)line, 1.0f, NULL); }
 
 static void show_error(const char* what) {
     say("fatal: %s", what);
@@ -1342,7 +1353,7 @@ static int ask_user(char* out, int max) {
     s.posy = SCREEN_H / 2;
     s.horizontalAlignment = ORBIS_H_CENTER;
     s.verticalAlignment = ORBIS_V_CENTER;
-    s.title = L"Garlic LLM";
+    s.title = L"DarkGarlic LLM";
     s.placeholder = placeholder;
     int r = sceImeDialogInit(&s, NULL);
     if (r < 0) {
@@ -1914,6 +1925,11 @@ int main(void) {
     eng_margin_mb = 64 - ui_screen_pool_mb();   // (the screen block came out of the system's 64 MiB)
     const char* eng_assets = ASSETS;
     if (engine_init(&eng, eng_assets, loading, (void*)tr(S_LOADING_MODEL))) show_error(eng.error);
+    if (eng.shard && eng.nodes > 1 && eng.node > 0) cluster_worker_main(&eng, cluster_status);   // never returns
+    if (eng.shard && eng.nodes > 1) {   // node 0 of a cluster: reach the workers before anything runs on the model
+        char cerr[200];
+        if (cluster_head_start(&eng, cluster_status, cerr, sizeof(cerr))) show_error(cerr);
+    }
     say("language model ready; GPU memory used %u of %u MiB; context cache %s, %u tokens (%u while voice mode "
         "borrows %u MiB)", (unsigned)(eng.next >> 20), (unsigned)(eng.mem_size >> 20),
         eng.tq ? "TurboQuant 4-bit" : "fp16 k + int8 v", eng.max_seq, eng.lend_ctx, (unsigned)(eng.kv_split >> 20));

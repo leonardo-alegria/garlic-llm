@@ -1286,7 +1286,8 @@ static int letters(St* st, int i) {
         return j;
     }
     // a plain word: copied (Garlic's own name in Cyrillic for Russian: T3 misreads the Latin letters)
-    if (L == RU && j - i == 6 && !strncmp(s + i, "Garlic", 6)) put(b, "Гарлик");
+    if (L == RU && j - i == 10 && !strncmp(s + i, "DarkGarlic", 10)) put(b, "Дарк Гарлик");
+    else if (L == RU && j - i == 6 && !strncmp(s + i, "Garlic", 6)) put(b, "Гарлик");
     else putn(b, s + i, j - i);
     st->century = is_cent;
     return j;

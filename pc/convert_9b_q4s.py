@@ -1,11 +1,11 @@
 """Qwen3.5-9B for MTP + SWAR: every matrix in "q4s" (shaders/spec.h), gate/up in 4 bits instead of q3i, and lm_head
 trimmed to the rows of a keep list (KEEP below: a .npy of token ids, most frequent first).
 
-From models/qwen3.5-9b-mix.bin (written by pc/modal_qwen35_9b.py): every q4i matrix is laid out again as q4s (same
-nibbles, same scales: bit for bit the same weights); gate/up come again from the original bf16 weights
-(Qwen/Qwen3.5-9B on Hugging Face, only those tensors, read by byte ranges) and are quantized with pc/q4.py like every
-other matrix of the app. The input embedding rows (q4row, read from the disk by the CPU) stay as they are: every token
-can still be read.
+From models/qwen3.5-9b-mix.bin (written by pc/modal_qwen35_9b.py or pc/local_qwen35_9b.py): every q4i matrix is laid
+out again as q4s (same nibbles, same scales: bit for bit the same weights). With the default --q3=0-31 the gate/up
+matrices stay in the 3-bit form already stored in the mix file. --mtp reads the draft head by HTTP range from HF
+(below). The index next to those shards must be the same checkpoint, or the ranges pull the wrong bytes. The input
+embedding rows (q4row, read from the disk by the CPU) stay as they are: every token can still be read.
 
   python convert_9b_q4s.py            -> models/qwen3.5-9b-q4s.bin/.json and model.idx (in IDX_OUT)
   python convert_9b_q4s.py --check    -> compares a few rows of each converted matrix with the source
@@ -31,14 +31,29 @@ ROOT = HERE.parent
 sys.path.insert(0, str(HERE))
 from q4 import quantize_q4  # noqa: E402
 
+def _need_json(path, what):
+    if not path.exists():
+        sys.exit(f"missing {what}: {path}")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 SRC = ROOT / "models" / "qwen3.5-9b-mix.bin"
-META = json.loads((ROOT / "models" / "qwen3.5-9b-mix.json").read_text())
+META = _need_json(ROOT / "models" / "qwen3.5-9b-mix.json", "mix sidecar (run local_qwen35_9b.py or the Modal converter first)")
 NAME = "qwen3.5-9b-q4s"
 OUT = ROOT / "models" / f"{NAME}.bin"
 CACHE = ROOT / "models" / "q4s_cache"     # gate/up in q4s per layer (re-runs do not fetch them again)
 IDX_OUT = ROOT / "chat" / "assets_9b"
-HF = "https://huggingface.co/Qwen/Qwen3.5-9B/resolve/main/"
-HF_INDEX = json.loads((ROOT / "models" / "Qwen3.5-9B" / "model.safetensors.index.json").read_text())["weight_map"]
+HF_REPO = "huihui-ai/Huihui-Qwen3.5-9B-abliterated"
+HF = f"https://huggingface.co/{HF_REPO}/resolve/main/"
+_index_candidates = [
+    ROOT / "models" / "Huihui-Qwen3.5-9B-abliterated" / "model.safetensors.index.json",
+    ROOT / "models" / "Qwen3.5-9B" / "model.safetensors.index.json",
+]
+_index_path = next((p for p in _index_candidates if p.exists()), None)
+if _index_path is None:
+    sys.exit("missing safetensors index. Save model.safetensors.index.json from "
+             f"{HF_REPO} at {_index_candidates[0]}")
+HF_INDEX = _need_json(_index_path, "safetensors index")["weight_map"]
 FMT = {"q4": 2, "q8": 1, "q4i": 3, "q4row": 4, "q3i": 5, "q4s": 6, "ids": 7, "q3s": 8}
 
 

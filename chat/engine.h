@@ -136,8 +136,10 @@ typedef struct {
     double last_seconds;        // time of the last whole sentence
 } S3G;
 
-typedef struct {
-    // model shape (assets/model.idx)
+struct EngineLink;
+
+typedef struct Engine {
+    // model shape (assets/model.idx, or /data/darkgarlic/model.idx when that file exists: engine_init)
     uint32_t n_layers, hidden, inter, n_heads, n_kv, head_dim, vocab, max_seq, eos, eos2;
     float eps, rope_theta;
     // Qwen3.5 (model.idx "PMQ5"): Gated DeltaNet shape, partial RoPE, which layers are full attention
@@ -223,7 +225,32 @@ typedef struct {
     Asr asr;
     T3 t3;
     S3G s3;
+
+    // DarkGarlic cluster (docs/CLUSTER.md). A shard's model.idx ends with the "PSHD" trailer (pc/shard_model.py):
+    // this console is `node` of `nodes` and runs layers [l0, l1); has_lm = the final norm and lm_head are here (the
+    // last node draws the token). Without the trailer: l0 = 0, l1 = n_layers, has_lm = 1, nodes = 1 (as before).
+    int shard;
+    uint32_t l0, l1, node, nodes, has_lm, has_embed;
+    char shard_name[32];
+    uint32_t idx_hash;            // shape hash for the cluster HELLO (0 until load_index fills it)
+    char model_dir[96];           // where model.idx came from (ASSETS or /data/darkgarlic)
+    uint64_t ostage;              // a node without lm_head: each step's output row (STEPS_PER_SUBMIT rows)
+    int stage_in;                 // this run's first layer reads its rows from staging (embedding rows or rows_in)
+    uint64_t state_slot;          // a worker's saved DeltaNet states (CL_STATE)
+    struct EngineLink* link;      // the cluster's hooks; NULL on a single console
 } Engine;
+
+// How the engine hands its output rows on when lm_head is on another console (cluster.c sets it up). rows: n rows of
+// `hidden` floats, the output of this console's last layer for positions pos0..; final = the caller wants the token
+// after the last row: return its lm_head row in *row. reset / state follow engine_reset and engine_state_copy on the
+// head (NULL on workers). Each returns 0, or -1 with e->error set.
+typedef struct EngineLink {
+    int (*rows)(struct EngineLink* l, Engine* e, const float* rows, int n, int pos0, int final, float temperature,
+                uint32_t seed, uint32_t* row);
+    int (*reset)(struct EngineLink* l, Engine* e);
+    int (*state)(struct EngineLink* l, Engine* e, int save);
+    void* user;
+} EngineLink;
 
 // Direct memory engine_init leaves to the system (MiB; main.c sets it before engine_init).
 extern int eng_margin_mb;
@@ -233,6 +260,13 @@ int engine_init(Engine* e, const char* assets_dir, ProgressFn progress, void* us
 // temperature 0 = greedy. Returns 0 and the sampled token in *next, or -1 with e->error set.
 // (n >= 4 goes through the layers in batches of up to 32 tokens, shaders/prefill.h, unless e->pf_off.)
 int engine_run(Engine* e, const uint32_t* tokens, int n, int pos0, float temperature, uint32_t seed, uint32_t* next);
+// A worker's step: n rows of `hidden` floats (the previous node's output) through this console's layers, starting
+// at position pos0. The output rows go to e->link->rows (a middle node); the last node draws the token after the last
+// row when `sample` and returns its lm_head row in *row. 0, or -1 with e->error set.
+int engine_run_rows(Engine* e, const float* rows, int n, int pos0, float temperature, uint32_t seed, int sample,
+                    uint32_t* row);
+// GPU memory still free after engine_init (0 if it does not fit): for the cluster's transfer buffers.
+uint64_t engine_alloc(Engine* e, uint64_t size);
 // The token id of an lm_head row (rows are ids unless lm_head is trimmed: Engine.ids), and the row of a token id
 // (-1 if that token is not in lm_head: it can be read but not written).
 uint32_t engine_token_of(const Engine* e, uint32_t row);

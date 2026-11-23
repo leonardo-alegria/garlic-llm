@@ -37,6 +37,7 @@ typedef struct {
 } ChatView;
 static ChatView view;
 static int fail_engine_at = -1;   // the engine fails on this call (-1: never)
+static int job_wire;               // ApiJob.wire for the next run_job (0 OpenAI, 1 Ollama chat, 2 generate)
 #define GARLIC_SPEC 1             // (as the 9B app: api_run.inc asks spec_active before every step)
 static int spec_on;               // the mock MTP head is on: a step keeps up to spec_keep tokens of its draft
 static int spec_keep = 2;
@@ -48,6 +49,8 @@ static int chat_begun, chat_ended, chat_replies, stop_at = -1;
 // Scripted reply: the model emits script[k], then IM_END. Tokens 500/501 are the two halves of "é".
 static const uint32_t* script;
 static int script_len, script_k, engine_calls, prompt_len_seen;
+static char prompt_text[16384];
+static int prompt_text_n;
 static char wire[1 << 16];
 static size_t wire_n;
 static int wire_fail;   // the client has gone: sends fail
@@ -115,7 +118,16 @@ static int engine_run(MockEngine* e, const uint32_t* tokens, int n, int pos0, fl
         snprintf(e->error, sizeof(e->error), "mock GPU fault");
         return -1;
     }
-    if (n > 1) prompt_len_seen = n, next_pos = 0;   // the prompt (fed in one go, from position 0)
+    if (n > 1) {   // the prompt (fed in one go, from position 0)
+        prompt_len_seen = n;
+        next_pos = 0;
+        prompt_text_n = 0;
+        for (int i = 0; i < n && prompt_text_n + 1 < (int)sizeof(prompt_text); i++) {
+            if (tokens[i] == 0 || tokens[i] >= 1000) continue;
+            prompt_text[prompt_text_n++] = (char)(tokens[i] - 1);
+        }
+        prompt_text[prompt_text_n] = 0;
+    }
     else fed++;
     if (pos0 != next_pos) pos_errors++;
     next_pos += n;
@@ -172,11 +184,14 @@ static void run_job(const char* body, const uint32_t* sc, int sc_len) {
     script_k = 0;
     engine_calls = 0;
     fed = 0;
+    prompt_text_n = 0;
+    prompt_text[0] = 0;
     ApiJob job;
     memset(&job, 0, sizeof(job));
     job.body = (char*)body;
     job.body_len = strlen(body);
     job.fd = 7;
+    job.wire = job_wire;
     api_job(&job);
 }
 
@@ -378,6 +393,123 @@ static void test_cut_char(void) {
     CHECK(strstr(wire, "\"content\":\"a\xc3\xa9\"") != NULL);
 }
 
+static void test_ollama_job(void) {
+    static const uint32_t sc[] = {'H' + 1, 'o' + 1, 'l' + 1, 'a' + 1};
+    job_wire = 1;
+    run_job("{\"messages\":[{\"role\":\"user\",\"content\":\"x\"}],\"stream\":true,\"max_tokens\":10}", sc, 4);
+    CHECK(strstr(wire, "Content-Type: application/x-ndjson") != NULL);
+    CHECK(strstr(wire, "\"content\":\"H\"") != NULL);
+    CHECK(strstr(wire, "\"content\":\"a\"") != NULL);
+    CHECK(strstr(wire, "\"done\":true") != NULL);
+    CHECK(strstr(wire, "\"done_reason\":\"stop\"") != NULL);
+    CHECK(strstr(wire, "\"prompt_eval_count\":") != NULL);
+    CHECK(strstr(wire, "data:") == NULL);
+    CHECK(strstr(wire, "text/event-stream") == NULL);
+
+    job_wire = 2;
+    run_job("{\"messages\":[{\"role\":\"user\",\"content\":\"x\"}],\"stream\":false,\"max_tokens\":10}", sc, 4);
+    CHECK(strncmp(wire, "HTTP/1.1 200 OK\r\nContent-Type: application/json", 46) == 0);
+    CHECK(strstr(wire, "\"response\":\"Hola\"") != NULL);
+    CHECK(strstr(wire, "\"done\":true") != NULL);
+    CHECK(strstr(wire, "\"done_reason\":\"stop\"") != NULL);
+    CHECK(strstr(wire, "ndjson") == NULL);
+
+    job_wire = 1;
+    run_job("{\"messages\":[]}", NULL, 0);
+    CHECK(strncmp(wire, "HTTP/1.1 400", 12) == 0);
+    CHECK(strstr(wire, "{\"error\":") != NULL);
+    CHECK(strstr(wire, "invalid_request_error") == NULL);
+
+    fail_engine_at = 2;
+    run_job("{\"messages\":[{\"role\":\"user\",\"content\":\"x\"}],\"stream\":true,\"max_tokens\":10}", sc, 4);
+    fail_engine_at = -1;
+    CHECK(strstr(wire, "{\"error\":\"mock GPU fault\"}") != NULL);
+    CHECK(strstr(wire, "data:") == NULL);
+    job_wire = 0;
+}
+
+static int ids_of(const char* s, uint32_t* out, int max) {
+    int n = 0;
+    for (; *s && n < max; s++) out[n++] = (unsigned char)*s + 1;
+    return n;
+}
+
+static void test_tools(void) {
+    static const uint32_t hi[] = {'H' + 1, 'i' + 1};
+    run_job("{\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"tools\":[],\"max_tokens\":10}", hi, 2);
+    CHECK(prompt_len_seen == 27);   // an empty tools list leaves the prompt as it was
+
+    const char* hist =
+        "{\"messages\":["
+        "{\"role\":\"system\",\"content\":\"Be brief\"},"
+        "{\"role\":\"user\",\"content\":\"read notes\"},"
+        "{\"role\":\"assistant\",\"content\":\"Sure\",\"tool_calls\":[{\"type\":\"function\",\"function\":{"
+        "\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"notes.txt\\\",\\\"limit\\\":5}\"}}]},"
+        "{\"role\":\"tool\",\"content\":\"hello\"},"
+        "{\"role\":\"user\",\"content\":\"thanks\"}"
+        "],\"tools\":[{\"type\":\"function\",\"function\":{\"name\":\"read_file\",\"parameters\":{\"type\":\"object\","
+        "\"properties\":{\"path\":{\"type\":\"string\"},\"limit\":{\"type\":\"integer\"}}}}}],\"max_tokens\":8}";
+    run_job(hist, hi, 2);
+    CHECK(prompt_text_n > 0);
+    CHECK(strstr(prompt_text, "# Tools") && strstr(prompt_text, "<tools>") && strstr(prompt_text, "</IMPORTANT>"));
+    const char* brief = strstr(prompt_text, "Be brief");
+    CHECK(brief && strstr(brief + 1, "Be brief") == NULL);
+    CHECK(strstr(prompt_text, "<function=read_file>") && strstr(prompt_text, "<tool_response>"));
+    CHECK(strstr(prompt_text, "hello") && strstr(prompt_text, "thanks"));
+
+    const char* xml =
+        "Ok\n\n<tool_call>\n<function=read_file>\n<parameter=path>\nnotes.txt\n</parameter>\n"
+        "<parameter=limit>\n5\n</parameter>\n</function>\n</tool_call>";
+    uint32_t sc[512];
+    int nsc = ids_of(xml, sc, 512);
+    const char* ask =
+        "{\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"tools\":[{\"type\":\"function\",\"function\":{"
+        "\"name\":\"read_file\",\"parameters\":{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},"
+        "\"limit\":{\"type\":\"integer\"}}}}}],\"max_tokens\":400}";
+    run_job(ask, sc, nsc);
+    CHECK(strstr(wire, "\"finish_reason\":\"tool_calls\"") != NULL);
+    CHECK(strstr(wire, "\"content\":\"Ok\"") != NULL);
+    CHECK(strstr(wire, "\"name\":\"read_file\"") != NULL);
+    CHECK(strstr(wire, "\\\"path\\\":\\\"notes.txt\\\"") != NULL);
+    CHECK(strstr(wire, "\\\"limit\\\":5") != NULL);
+    CHECK(strstr(wire, "<tool_call>") == NULL);
+    CHECK(strstr(wire, "<function=") == NULL);
+
+    char stream_body[1024];
+    snprintf(stream_body, sizeof(stream_body),
+             "{\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"stream\":true,\"tools\":[{\"type\":\"function\","
+             "\"function\":{\"name\":\"read_file\",\"parameters\":{\"type\":\"object\",\"properties\":{"
+             "\"path\":{\"type\":\"string\"},\"limit\":{\"type\":\"integer\"}}}}}],\"max_tokens\":400}");
+    run_job(stream_body, sc, nsc);
+    CHECK(strstr(wire, "Content-Type: text/event-stream") != NULL);
+    CHECK(strstr(wire, "\"content\":\"O\"") != NULL);
+    CHECK(strstr(wire, "\"content\":\"k\"") != NULL);
+    CHECK(strstr(wire, "<tool_call>") == NULL);
+    CHECK(strstr(wire, "\"tool_calls\"") != NULL);
+    CHECK(strstr(wire, "\"finish_reason\":\"tool_calls\"") != NULL);
+    CHECK(strstr(wire, "data: [DONE]\n\n") != NULL);
+
+    const char* partial = "<tool_call>\n<function=read_file>";
+    nsc = ids_of(partial, sc, 512);
+    char cut_body[1024];
+    snprintf(cut_body, sizeof(cut_body),
+             "{\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"tools\":[{\"type\":\"function\",\"function\":{"
+             "\"name\":\"read_file\",\"parameters\":{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}"
+             "}}}}],\"max_tokens\":%d}",
+             nsc);
+    run_job(cut_body, sc, nsc);
+    CHECK(strstr(wire, "\"finish_reason\":\"length\"") != NULL);
+    CHECK(strstr(wire, "<tool_call>") != NULL);
+    CHECK(strstr(wire, "\"tool_calls\"") == NULL);
+
+    job_wire = 1;
+    run_job(ask, sc, ids_of(xml, sc, 512));
+    CHECK(strstr(wire, "\"arguments\":{\"path\":\"notes.txt\",\"limit\":5}") != NULL);
+    CHECK(strstr(wire, "\"done_reason\":\"stop\"") != NULL);
+    CHECK(strstr(wire, "<tool_call>") == NULL);
+    job_wire = 0;
+}
+
 static void test_utf8(void) {
     CHECK(api_utf8_whole((const uint8_t*)"\xc3", 1) == 0);
     CHECK(api_utf8_whole((const uint8_t*)"a\xc3", 2) == 1);
@@ -399,6 +531,8 @@ int main(void) {
         test_stop();
         test_long_prompt();
         test_cut_char();
+        test_ollama_job();
+        test_tools();
         CHECK(pos_errors == 0);           // every token went in at the position after the one before
         CHECK(chat_begun == chat_ended);   // every request that took the screen gave it back
         CHECK(chat_replies <= chat_begun);

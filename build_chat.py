@@ -1,7 +1,7 @@
-"""Build Garlic LLM (chat/*.c + MicroPython + chat/assets) as a fake PKG with the OpenOrbis toolchain (see build.py).
+"""Build DarkGarlic LLM (chat/*.c + MicroPython + chat/assets) as a fake PKG with the OpenOrbis toolchain (see build.py).
 
-Run: python build_chat.py           -> build/chat/IV0000-PSAI00001_00-PS4LOCALAICHAT01.pkg ("Garlic LLM", Qwen3.5-9B)
-     python build_chat.py --4b      -> "Garlic LLM 4B" (PSAI00002), a second app that installs next to the first
+Run: python build_chat.py           -> build/chat/IV0000-PSAI00001_00-PS4LOCALAICHAT01.pkg ("DarkGarlic LLM", Qwen3.5-9B)
+     python build_chat.py --4b      -> "DarkGarlic LLM 4B" (PSAI00002), a second app that installs next to the first
      --upload                       -> also copies the package to the console (/data/pkg/), see PS4_IP in build.py
      --full                         -> the all-in-one package, with the weights inside: models/<file> goes to
                                        /app0/models, where the app looks first (chat/engine.c weights_locate)
@@ -21,14 +21,17 @@ ROOT = b.ROOT
 OUT = ROOT / "build" / "chat"
 PKGDIR = OUT / "pkg"
 if "--4b" in sys.argv:
-    TITLE, VERSION, TITLE_ID, SUFFIX = "Garlic LLM 4B", "1.17", "PSAI00002", "02"
+    TITLE, VERSION, TITLE_ID, SUFFIX = "DarkGarlic LLM 4B", "1.17", "PSAI00002", "02"
     REMOTE = "/data/pkg/Garlic-LLM-4B.pkg"
 else:
-    TITLE, VERSION, TITLE_ID, SUFFIX = "Garlic LLM", "1.20", "PSAI00001", "01"
+    TITLE, VERSION, TITLE_ID, SUFFIX = "DarkGarlic LLM", "1.20", "PSAI00001", "01"
     REMOTE = "/data/pkg/Garlic-LLM.pkg"
 FULL = "--full" in sys.argv
 # the weights of the all-in-one package (the names the .idx files give, see weights_locate)
-FULL_MODELS = (["qwen3.5-4b-q4i.bin"] if "--4b" in sys.argv else ["qwen3.5-9b-q4s.bin", "qwen3.5-9b-mtp.bin"]) +     ["parakeet-v3-q4i.bin", "chatterbox-t3.bin", "chatterbox-s3gen-mf.bin"]
+# voice files are included when they are in models/; chat and the API do not need them
+REQUIRED_MODELS = ["qwen3.5-4b-q4i.bin"] if "--4b" in sys.argv else ["qwen3.5-9b-q4s.bin", "qwen3.5-9b-mtp.bin"]
+OPTIONAL_MODELS = ["parakeet-v3-q4i.bin", "chatterbox-t3.bin", "chatterbox-s3gen-mf.bin"]
+PACKED_MODELS = []
 CONTENT_ID = f"IV0000-{TITLE_ID}_00-PS4LOCALAICHAT{SUFFIX}"
 SOURCES = sorted((ROOT / "chat").glob("*.c"))
 MP = ROOT / "chat" / "py" / "mp"
@@ -97,8 +100,19 @@ def main():
         shutil.copy(f, PKGDIR / "assets" / f.name)
     if FULL:
         (PKGDIR / "models").mkdir()
-        for name in FULL_MODELS:   # hard links: no second copy on the disk
-            os.link(ROOT / "models" / name, PKGDIR / "models" / name)
+        for name in REQUIRED_MODELS + OPTIONAL_MODELS:
+            src = ROOT / "models" / name
+            if not src.exists():
+                if name in REQUIRED_MODELS:
+                    sys.exit(f"missing {src}")
+                print(f"skip {name}: not in models/ (voice stays unavailable)")
+                continue
+            dest = PKGDIR / "models" / name
+            try:
+                os.link(src, dest)   # same disk: no second copy
+            except OSError:
+                shutil.copy2(src, dest)   # models/ is on another drive
+            PACKED_MODELS.append(name)
     objs = compile_all()
     elf = OUT / "ps4ai.elf"
     b.run([b.ZIG, "ld.lld", "-m", "elf_x86_64", "-pie", "--script", b.OO / "link.x", "--eh-frame-hdr", *objs,
@@ -123,7 +137,7 @@ def main():
     files += [f"sce_module/{p.name}" for p in (PKGDIR / "sce_module").glob("*.prx")]
     files += [p.relative_to(PKGDIR).as_posix() for p in sorted((PKGDIR / "assets").rglob("*")) if p.is_file()]
     if FULL:
-        files += [f"models/{name}" for name in FULL_MODELS]
+        files += [f"models/{name}" for name in PACKED_MODELS]
     b.run([b.BIN / f"create-gp4{b.EXE}", "-out", "pkg.gp4", f"--content-id={CONTENT_ID}", "--files", " ".join(files)],
           cwd=PKGDIR)
     fix_gp4_dirs()

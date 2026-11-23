@@ -1,10 +1,10 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "Garlic LLM API",
+    "title": "DarkGarlic LLM API",
     "version": "1.20",
-    "summary": "OpenAI-compatible chat API for Garlic LLM, running on a PlayStation 4.",
-    "description": "Garlic LLM runs Qwen3.5 on the PS4's own GPU. This API speaks the OpenAI Chat Completions protocol, so existing OpenAI client libraries work by changing the base URL to http://<console-address>:8080/v1.\n\nThe API is off until it is turned on with L3 on the console's chat screen, which then shows the address.\n\nOne request runs at a time; a request sent meanwhile waits for it. While the model answers, the console's screen says so and the conversation that was on it is cleared. Circle on the controller stops the reply: the client gets what was written so far, with finish_reason \"length\".\n\nReasoning is always off. Parameters the console does not implement (for example tools, logprobs, presence_penalty) are ignored. Only n = 1 is supported.",
+    "summary": "OpenAI-compatible chat API for DarkGarlic LLM, running on a PlayStation 4.",
+    "description": "DarkGarlic LLM runs Qwen3.5 on the PS4's own GPU. This API speaks the OpenAI Chat Completions protocol, so existing OpenAI client libraries work by changing the base URL to http://<console-address>:8080/v1.\n\nThe API is off until it is turned on with L3 on the console's chat screen, which then shows the address.\n\nOne request runs at a time; a request sent meanwhile waits for it. While the model answers, the console's screen says so and the conversation that was on it is cleared. Circle on the controller stops the reply: the client gets what was written so far, with finish_reason \"length\".\n\nReasoning is always off. Parameters the console does not implement (for example tools, logprobs, presence_penalty) are ignored. Only n = 1 is supported.",
     "license": { "name": "GPL-3.0", "url": "https://github.com/leonardo-alegria/garlic-llm/blob/main/LICENSE" }
   },
   "servers": [

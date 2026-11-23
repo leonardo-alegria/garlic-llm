@@ -11,8 +11,9 @@
 
 typedef struct ApiJob {
     int fd;                     // the connection: the main thread writes the whole reply to it
-    char* body;                 // the request's JSON (validated by the server thread)
+    char* body;                 // OpenAI chat.completions JSON (an Ollama body is converted before it is queued)
     size_t body_len;
+    int wire;                   // 0 OpenAI, 1 Ollama /api/chat, 2 Ollama /api/generate
     volatile int done;          // 1 once the main thread has written the reply
     struct ApiJob* next;
 } ApiJob;

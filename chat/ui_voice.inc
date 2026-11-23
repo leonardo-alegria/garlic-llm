@@ -6,8 +6,7 @@ void draw_voice_mode(int state, const char* reply, float level, double time) {
     // header: logo, name, "voice mode" chip
     draw_image(&logo_s, 64, (HEADER_H - logo_s.h) / 2 - 2, 255);
     int tx = 64 + (logo_s.w ? logo_s.w + 14 : 0);
-    tx = draw_str(&font_big, tx, (HEADER_H - font_big.line) / 2, "Garlic", 0xFFFFFF);
-    tx = draw_str(&font_big, tx + font_big.space, (HEADER_H - font_big.line) / 2, "LLM", C_ACCENT_HI);
+    draw_wordmark(tx, (HEADER_H - font_big.line) / 2);
     chip(SCREEN_W - 64, HEADER_H / 2, tr(S_VOICE_MODE), 0xFFFFFF, C_ACCENT_HI, 1.0f, -1);
 
     float cx = SCREEN_W / 2.0f, cy = 360, t = (float)time;
@@ -32,7 +31,7 @@ void draw_voice_mode(int state, const char* reply, float level, double time) {
         }
         circle(cx, cy, base + 12, 0, C_ACCENT, 40);
     }
-    circle(cx, cy, base, 0, 0x0E2145, 255);
+    circle(cx, cy, base, 0, 0x10080A, 255);
     circle(cx, cy, base, 2, state == VM_LISTEN ? C_GREEN : C_ACCENT_HI, 200);
     draw_image(&logo_l, (int)cx - logo_l.w / 2, (int)cy - logo_l.h / 2 - 4, 255);
 

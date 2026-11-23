@@ -118,7 +118,7 @@ static void test_chat(void) {
 static void test_writers(void) {
     Sb s;
     sb_init(&s);
-    api_json_completion(&s, "chatcmpl-1", "Qwen3.5-9B", 1700000000, "Hola \"mundo\"\n", 13, "stop", 5, 4);
+    api_json_completion(&s, "chatcmpl-1", "Qwen3.5-9B", 1700000000, "Hola \"mundo\"\n", 13, "stop", 5, 4, NULL, 0, 0);
     CHECK(s.p && strstr(s.p, "\"content\":\"Hola \\\"mundo\\\"\\n\"") != NULL);
     CHECK(strstr(s.p, "\"total_tokens\":9") != NULL);
     CHECK(strstr(s.p, "\"finish_reason\":\"stop\"") != NULL);
@@ -142,11 +142,192 @@ static void test_writers(void) {
     sb_free(&s);
 }
 
+static void test_ollama(void) {
+    Sb s;
+    sb_init(&s);
+    const char* err = NULL;
+    const char* chat = "{\"messages\":[{\"role\":\"user\",\"content\":\"Hi\"}],"
+                       "\"options\":{\"temperature\":0.2,\"num_predict\":32,\"seed\":3}}";
+    CHECK(api_ollama_as_openai(chat, strlen(chat), 0, &s, &err) == 0);
+    JNode pool[API_MAX_NODES];
+    ChatRequest req;
+    CHECK(api_chat_parse(s.p, s.n, pool, API_MAX_NODES, &req, &err) == 0);
+    CHECK(req.stream == 1 && req.max_tokens == 32 && req.has_seed && req.seed == 3 && req.n_messages == 1);
+    CHECK(req.temperature > 0.19 && req.temperature < 0.21);
+    sb_free(&s);
+
+    sb_init(&s);
+    const char* gen = "{\"prompt\":\"Hi\",\"system\":\"Be brief\",\"stream\":false,"
+                      "\"options\":{\"num_predict\":-1,\"seed\":9}}";
+    CHECK(api_ollama_as_openai(gen, strlen(gen), 1, &s, &err) == 0);
+    CHECK(api_chat_parse(s.p, s.n, pool, API_MAX_NODES, &req, &err) == 0);
+    CHECK(req.stream == 0 && req.max_tokens == 4096 && req.n_messages == 2 && req.has_seed && req.seed == 9);
+    char role[16];
+    Sb content;
+    sb_init(&content);
+    int m = pool[req.messages].first;
+    CHECK(api_message(pool, m, role, sizeof(role), &content) == 0 && !strcmp(role, "system"));
+    CHECK(content.n == 8 && !memcmp(content.p, "Be brief", 8));
+    sb_free(&content);
+    sb_init(&content);
+    CHECK(api_message(pool, pool[m].next, role, sizeof(role), &content) == 0 && !strcmp(role, "user"));
+    CHECK(content.n == 2 && !memcmp(content.p, "Hi", 2));
+    sb_free(&content);
+    sb_free(&s);
+
+    sb_init(&s);
+    CHECK(api_ollama_as_openai("{\"prompt\":1}", 12, 1, &s, &err) == -1);
+    CHECK(err && strstr(err, "prompt"));
+    sb_free(&s);
+    sb_init(&s);
+    CHECK(api_ollama_as_openai("{\"messages\":[]}", 15, 0, &s, &err) == -1);
+    sb_free(&s);
+
+    sb_init(&s);
+    api_json_ollama_version(&s);
+    CHECK(s.p && !strcmp(s.p, "{\"version\":\"1.20-darkgarlic\"}"));
+    sb_free(&s);
+    sb_init(&s);
+    api_json_ollama_tags(&s, "Qwen3.5-9B");
+    CHECK(s.p && strstr(s.p, "\"name\":\"Qwen3.5-9B\"") && strstr(s.p, "\"family\":\"qwen3\""));
+    sb_free(&s);
+    sb_init(&s);
+    api_json_ollama_show(&s, "Qwen3.5-9B");
+    CHECK(s.p && strstr(s.p, "\"model\":\"Qwen3.5-9B\"") && strstr(s.p, "general.architecture"));
+    sb_free(&s);
+    sb_init(&s);
+    api_json_ollama_error(&s, "nope");
+    CHECK(s.p && !strcmp(s.p, "{\"error\":\"nope\"}"));
+    sb_free(&s);
+    sb_init(&s);
+    api_json_ollama_chat(&s, "m", "2026-11-22T00:00:00Z", "Hi", 2, 1, "stop", 3, 1, NULL, 0);
+    CHECK(strstr(s.p, "\"content\":\"Hi\"") && strstr(s.p, "\"done\":true") && strstr(s.p, "\"done_reason\":\"stop\""));
+    CHECK(strstr(s.p, "\"prompt_eval_count\":3") && strstr(s.p, "\"eval_count\":1"));
+    sb_free(&s);
+    sb_init(&s);
+    api_json_ollama_gen(&s, "m", "2026-11-22T00:00:00Z", "A", 1, 0, NULL, 0, 0);
+    CHECK(strstr(s.p, "\"response\":\"A\"") && strstr(s.p, "\"done\":false") && !strstr(s.p, "done_reason"));
+    sb_free(&s);
+}
+
+static void test_tools(void) {
+    JNode pool[API_MAX_NODES];
+    ChatRequest req;
+    const char* err = NULL;
+    const char* body =
+        "{\"messages\":[{\"role\":\"system\",\"content\":\"  Be brief  \"},{\"role\":\"user\",\"content\":\"hi\"}],"
+        "\"tools\":[{\"type\":\"function\",\"function\":{\"name\":\"read_file\",\"parameters\":{\"type\":\"object\","
+        "\"properties\":{\"path\":{\"type\":\"string\"},\"limit\":{\"type\":\"integer\"},\"flag\":{\"type\":\"boolean\"},"
+        "\"meta\":{\"type\":\"object\"}}}}}]}";
+    CHECK(api_chat_parse(body, strlen(body), pool, API_MAX_NODES, &req, &err) == 0);
+    CHECK(req.n_tools == 1 && req.tools >= 0 && req.n_schemas == 1);
+    CHECK(!strcmp(req.schemas[0].name, "read_file") && req.schemas[0].n_params == 4);
+    CHECK(!strcmp(req.schemas[0].params[0].name, "path") && req.schemas[0].params[0].type == API_P_STR);
+    CHECK(!strcmp(req.schemas[0].params[1].name, "limit") && req.schemas[0].params[1].type == API_P_INT);
+    CHECK(req.schemas[0].params[2].type == API_P_BOOL && req.schemas[0].params[3].type == API_P_OBJ);
+
+    const char* empty = "{\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"tools\":[]}";
+    CHECK(api_chat_parse(empty, strlen(empty), pool, API_MAX_NODES, &req, &err) == 0);
+    CHECK(req.n_tools == 0 && req.tools == -1);
+    const char* bad_tools = "{\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"tools\":{}}";
+    CHECK(api_chat_parse(bad_tools, strlen(bad_tools), pool, API_MAX_NODES, &req, &err) == -1);
+
+    CHECK(api_chat_parse(body, strlen(body), pool, API_MAX_NODES, &req, &err) == 0);
+    Sb sys;
+    sb_init(&sys);
+    int ate = 0;
+    CHECK(api_tools_system(pool, req.tools, pool[req.messages].first, &sys, &ate) == 0);
+    CHECK(ate == 1);
+    CHECK(sys.p && strstr(sys.p, "<tools>") && strstr(sys.p, "read_file") && strstr(sys.p, "</IMPORTANT>"));
+    CHECK(strstr(sys.p, "Be brief") != NULL);
+    const char* once = strstr(sys.p, "Be brief");
+    CHECK(once && strstr(once + 1, "Be brief") == NULL);
+    sb_free(&sys);
+
+    const char* as_str =
+        "{\"role\":\"assistant\",\"content\":\"Sure\",\"tool_calls\":[{\"id\":\"c\",\"type\":\"function\","
+        "\"function\":{\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"notes.txt\\\",\\\"limit\\\":5}\"}}]}";
+    int root = json_parse(as_str, strlen(as_str), pool, API_MAX_NODES);
+    Sb xml;
+    sb_init(&xml);
+    CHECK(root >= 0 && api_message_tool_xml(pool, root, 1, &xml) == 0);
+    CHECK(xml.p && !strcmp(xml.p,
+                           "\n\n<tool_call>\n<function=read_file>\n<parameter=path>\nnotes.txt\n</parameter>\n"
+                           "<parameter=limit>\n5\n</parameter>\n</function>\n</tool_call>"));
+    sb_free(&xml);
+
+    const char* as_obj =
+        "{\"role\":\"assistant\",\"content\":\"\",\"tool_calls\":[{\"function\":{\"name\":\"read_file\","
+        "\"arguments\":{\"path\":\"notes.txt\",\"flag\":true}}}]}";
+    root = json_parse(as_obj, strlen(as_obj), pool, API_MAX_NODES);
+    sb_init(&xml);
+    CHECK(root >= 0 && api_message_tool_xml(pool, root, 0, &xml) == 0);
+    CHECK(xml.p && !strcmp(xml.p, "<tool_call>\n<function=read_file>\n<parameter=path>\nnotes.txt\n</parameter>\n"
+                                  "<parameter=flag>\nTrue\n</parameter>\n</function>\n</tool_call>"));
+    sb_free(&xml);
+
+    const char* model =
+        "Ok\n\n<tool_call>\n<function=read_file>\n<parameter=path>\nnotes.txt\n</parameter>\n"
+        "<parameter=limit>\n5\n</parameter>\n<parameter=code>\n007\n</parameter>\n</function>\n</tool_call>";
+    ApiToolCall calls[4];
+    int ncalls = 0, cut = 0;
+    Sb content;
+    sb_init(&content);
+    CHECK(api_chat_parse(body, strlen(body), pool, API_MAX_NODES, &req, &err) == 0);
+    CHECK(api_parse_tool_calls(model, strlen(model), req.schemas, req.n_schemas, &content, calls, 4, &ncalls, &cut) ==
+          0);
+    CHECK(ncalls == 1 && cut == 0 && content.n == 2 && !memcmp(content.p, "Ok", 2));
+    CHECK(!strcmp(calls[0].name, "read_file"));
+    CHECK(!strcmp(calls[0].arguments, "{\"path\":\"notes.txt\",\"limit\":5,\"code\":\"007\"}"));
+    sb_free(&content);
+
+    const char* partial = "Hi <tool_call>\n<function=read_file>";
+    sb_init(&content);
+    CHECK(api_parse_tool_calls(partial, strlen(partial), req.schemas, req.n_schemas, &content, calls, 4, &ncalls,
+                               &cut) == 0);
+    CHECK(ncalls == 0 && cut == 1 && content.n == strlen(partial) && !memcmp(content.p, partial, content.n));
+    sb_free(&content);
+
+    CHECK(api_tool_stream_end("hello", 5) == 5);
+    CHECK(api_tool_stream_end("a<", 2) == 1);
+    CHECK(api_tool_stream_end("hello <tool_ca", 14) == 6);
+    const char* held = "hello <tool_call>\n";
+    CHECK(api_tool_stream_end(held, strlen(held)) == 6);
+
+    Sb s;
+    sb_init(&s);
+    ApiToolCall one;
+    memset(&one, 0, sizeof(one));
+    memcpy(one.name, "read_file", 10);
+    memcpy(one.arguments, "{\"path\":\"notes.txt\"}", 20);
+    api_json_completion(&s, "chatcmpl-1", "Qwen3.5-9B", 1700000000, "", 0, "tool_calls", 5, 4, &one, 1, 7);
+    CHECK(s.p && strstr(s.p, "\"content\":null") && strstr(s.p, "\"finish_reason\":\"tool_calls\""));
+    CHECK(strstr(s.p, "\"id\":\"call_7_0\"") && strstr(s.p, "\"name\":\"read_file\""));
+    CHECK(strstr(s.p, "\"arguments\":\"{\\\"path\\\":\\\"notes.txt\\\"}\""));
+    sb_free(&s);
+
+    sb_init(&s);
+    api_json_ollama_chat(&s, "m", "2026-11-22T00:00:00Z", "Ok", 2, 1, "stop", 3, 8, &one, 1);
+    CHECK(strstr(s.p, "\"content\":\"Ok\"") && strstr(s.p, "\"arguments\":{\"path\":\"notes.txt\"}"));
+    CHECK(strstr(s.p, "\"done_reason\":\"stop\""));
+    sb_free(&s);
+
+    sb_init(&s);
+    const char* ochat = "{\"messages\":[{\"role\":\"user\",\"content\":\"Hi\"}],\"tools\":[{\"type\":\"function\","
+                        "\"function\":{\"name\":\"ping\"}}],\"stream\":false}";
+    CHECK(api_ollama_as_openai(ochat, strlen(ochat), 0, &s, &err) == 0);
+    CHECK(api_chat_parse(s.p, s.n, pool, API_MAX_NODES, &req, &err) == 0);
+    CHECK(req.n_tools == 1 && !strcmp(req.schemas[0].name, "ping") && req.stream == 0);
+    sb_free(&s);
+}
+
 int main(void) {
     test_http();
     test_json();
     test_chat();
     test_writers();
+    test_ollama();
+    test_tools();
     printf("%d checks, %d failed\n", checks, fails);
     return fails != 0;
 }

@@ -14,6 +14,7 @@
 #include <orbis/libkernel.h>
 
 #include "api_proto.h"
+#include "cluster.h"
 #include "ui.h"
 
 #define API_ASSETS "/app0/assets"
@@ -39,7 +40,7 @@ _Static_assert(sizeof(ApiSockaddrIn) == sizeof(OrbisNetSockaddr), "sockaddr size
 static OrbisPthreadMutex api_mu;
 static ApiJob* queued;          // waiting for the main loop
 static int busy;                // a chat job is queued or running (api_done clears it)
-static char model_name[64] = "Garlic";
+static char model_name[64] = "DarkGarlic";
 static char* key;               // the API key, or NULL
 static OrbisPthread api_th;
 static int ready, have_thread;  // the network library, the mutex and the key are set up (once); the thread exists
@@ -80,6 +81,36 @@ static void reply_json_error(int fd, int status, const char* reason, const char*
     api_json_error(&s, message, type, code);
     reply(fd, status, reason, "application/json", s.p, s.n);
     sb_free(&s);
+}
+
+static void reply_ollama_error(int fd, int status, const char* reason, const char* message) {
+    Sb s;
+    sb_init(&s);
+    api_json_ollama_error(&s, message);
+    reply(fd, status, reason, "application/json", s.p, s.n);
+    sb_free(&s);
+}
+
+// /api/show: the only model is the one loaded. A request that names another model is a miss.
+static int ollama_names_loaded(const char* body, size_t n) {
+    if (!n) return 1;
+    JNode* pool = malloc(sizeof(JNode) * 64);
+    if (!pool) return 1;
+    int root = json_parse(body, n, pool, 64);
+    int ok = 1;
+    if (root >= 0 && pool[root].type == J_OBJ) {
+        int m = json_get(pool, root, "model");
+        if (m < 0) m = json_get(pool, root, "name");
+        if (m >= 0 && pool[m].type == J_STR && pool[m].slen) {
+            Sb s;
+            sb_init(&s);
+            json_str_sb(pool, m, &s);
+            if (s.p && strcmp(s.p, model_name)) ok = 0;
+            sb_free(&s);
+        }
+    }
+    free(pool);
+    return ok;
 }
 
 ApiJob* api_take(void) {
@@ -133,29 +164,57 @@ static int read_request(int fd, char** buf_out, size_t* len_out, HttpRequest* re
     return r == 0 ? 0 : -1;
 }
 
-static void serve_chat(int fd, HttpRequest* req) {
+static void serve_chat(int fd, HttpRequest* req, int wire) {
+    char* body = NULL;
+    size_t body_len = 0;
+    const char* err = NULL;
+    if (wire) {
+        Sb conv;
+        sb_init(&conv);
+        if (api_ollama_as_openai(req->body, req->body_len, wire == 2, &conv, &err) || !conv.p) {
+            const char* msg = err ? err : "Out of memory.";
+            sb_free(&conv);
+            reply_ollama_error(fd, 400, "Bad Request", msg);
+            return;
+        }
+        body = conv.p;
+        body_len = conv.n;
+        conv.p = NULL;
+        sb_free(&conv);
+    } else {
+        body = malloc(req->body_len + 1);
+        if (!body) {
+            reply_json_error(fd, 500, "Internal Server Error", "Out of memory.", "server_error", NULL);
+            return;
+        }
+        memcpy(body, req->body, req->body_len);
+        body[req->body_len] = 0;
+        body_len = req->body_len;
+    }
     JNode* pool = malloc(sizeof(JNode) * API_MAX_NODES);
     ChatRequest cr;
-    const char* err = NULL;
-    if (!pool || api_chat_parse(req->body, req->body_len, pool, API_MAX_NODES, &cr, &err)) {
+    if (!pool || api_chat_parse(body, body_len, pool, API_MAX_NODES, &cr, &err)) {
         free(pool);
-        reply_json_error(fd, 400, "Bad Request", err ? err : "Out of memory.", "invalid_request_error", "invalid_body");
+        free(body);
+        if (wire)
+            reply_ollama_error(fd, 400, "Bad Request", err ? err : "Out of memory.");
+        else
+            reply_json_error(fd, 400, "Bad Request", err ? err : "Out of memory.", "invalid_request_error",
+                             "invalid_body");
         return;
     }
     free(pool);
     ApiJob* job = calloc(1, sizeof(ApiJob));
-    char* body = malloc(req->body_len + 1);
-    if (!job || !body) {
-        free(job);
+    if (!job) {
         free(body);
-        reply_json_error(fd, 500, "Internal Server Error", "Out of memory.", "server_error", NULL);
+        if (wire) reply_ollama_error(fd, 500, "Internal Server Error", "Out of memory.");
+        else reply_json_error(fd, 500, "Internal Server Error", "Out of memory.", "server_error", NULL);
         return;
     }
-    memcpy(body, req->body, req->body_len);
-    body[req->body_len] = 0;
     job->fd = fd;
     job->body = body;
-    job->body_len = req->body_len;
+    job->body_len = body_len;
+    job->wire = wire;
     scePthreadMutexLock(&api_mu);
     int full = busy;
     if (!full) {
@@ -166,11 +225,14 @@ static void serve_chat(int fd, HttpRequest* req) {
     if (full) {
         free(body);
         free(job);
-        reply_json_error(fd, 503, "Service Unavailable", "The model is busy with another request.", "server_error",
-                         "busy");
+        if (wire) reply_ollama_error(fd, 503, "Service Unavailable", "The model is busy with another request.");
+        else
+            reply_json_error(fd, 503, "Service Unavailable", "The model is busy with another request.", "server_error",
+                             "busy");
         return;
     }
-    say("api: chat request, %zu bytes, %s", req->body_len, cr.stream ? "streamed" : "whole reply");
+    say("api: %s request, %zu bytes, %s", wire == 2 ? "ollama generate" : wire ? "ollama chat" : "chat", body_len,
+        cr.stream ? "streamed" : "whole reply");
     // the main loop writes the reply to fd; the connection is closed here once it is written
     while (!job->done) sceKernelUsleep(5000);
     free(job->body);
@@ -197,8 +259,11 @@ static void handle(int fd) {
                         "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
         api_send(fd, h, strlen(h));
     } else if (!authorized(&req)) {
-        reply_json_error(fd, 401, "Unauthorized", "Missing or wrong API key.", "invalid_request_error",
-                         "invalid_api_key");
+        if (!strncmp(req.path, "/api/", 5))
+            reply_ollama_error(fd, 401, "Unauthorized", "Missing or wrong API key.");
+        else
+            reply_json_error(fd, 401, "Unauthorized", "Missing or wrong API key.", "invalid_request_error",
+                             "invalid_api_key");
     } else if (!strcmp(req.method, "GET") && (!strcmp(req.path, "/v1/models") || !strcmp(req.path, "/models"))) {
         Sb s;
         sb_init(&s);
@@ -214,9 +279,41 @@ static void handle(int fd) {
         else reply_json_error(fd, 404, "Not Found", "The API description is missing.", "invalid_request_error", NULL);
         free(spec);
     } else if (!strcmp(req.method, "POST") && !strcmp(req.path, "/v1/chat/completions")) {
-        serve_chat(fd, &req);
+        serve_chat(fd, &req, 0);
         free(buf);
         return;   // (serve_chat keeps the connection until the main loop has written the reply)
+    } else if (!strcmp(req.method, "POST") && !strcmp(req.path, "/api/chat")) {
+        serve_chat(fd, &req, 1);
+        free(buf);
+        return;
+    } else if (!strcmp(req.method, "POST") && !strcmp(req.path, "/api/generate")) {
+        serve_chat(fd, &req, 2);
+        free(buf);
+        return;
+    } else if (!strcmp(req.method, "GET") && !strcmp(req.path, "/api/tags")) {
+        Sb s;
+        sb_init(&s);
+        api_json_ollama_tags(&s, model_name);
+        reply(fd, 200, "OK", "application/json", s.p, s.n);
+        sb_free(&s);
+    } else if (!strcmp(req.method, "GET") && !strcmp(req.path, "/api/version")) {
+        Sb s;
+        sb_init(&s);
+        api_json_ollama_version(&s);
+        reply(fd, 200, "OK", "application/json", s.p, s.n);
+        sb_free(&s);
+    } else if (!strcmp(req.method, "POST") && !strcmp(req.path, "/api/show")) {
+        if (!ollama_names_loaded(req.body, req.body_len)) {
+            reply_ollama_error(fd, 404, "Not Found", "model not found");
+        } else {
+            Sb s;
+            sb_init(&s);
+            api_json_ollama_show(&s, model_name);
+            reply(fd, 200, "OK", "application/json", s.p, s.n);
+            sb_free(&s);
+        }
+    } else if (!strncmp(req.path, "/api/", 5)) {
+        reply_ollama_error(fd, 404, "Not Found", "No such endpoint.");
     } else {
         reply_json_error(fd, 404, "Not Found", "No such endpoint.", "invalid_request_error", NULL);
     }
@@ -263,14 +360,8 @@ static void* api_main(void* arg) {
 // time the API is turned on.
 static int api_setup(void) {
     if (ready) return 0;
-    int r = sceSysmoduleLoadModuleInternal(ORBIS_SYSMODULE_INTERNAL_NET);
-    if (r < 0) {
-        say("api: network module 0x%08X; the API stays off", r);
-        return -1;
-    }
-    r = sceNetInit();
-    if (r < 0) {
-        say("api: sceNetInit 0x%08X; the API stays off", r);
+    if (cluster_net_init()) {   // (shared with the cluster, which may have started it already)
+        say("api: no network library; the API stays off");
         return -1;
     }
     scePthreadMutexInit(&api_mu, NULL, "garlic_api");
@@ -376,6 +467,7 @@ int api_enable(int want) {
         have_thread = 1;
     }
     find_address();
-    say("api: OpenAI-compatible API on %s%s", address, key ? " (API key required)" : "");
+    say("api: OpenAI and Ollama API on %s%s (Ollama clients: OLLAMA_HOST=http://%s)", address,
+        key ? " (API key required)" : "", address);
     return 0;
 }

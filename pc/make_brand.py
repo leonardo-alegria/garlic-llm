@@ -1,9 +1,11 @@
-"""Garlic LLM brand images, drawn here (no external artwork):
+"""DarkGarlic LLM brand images, drawn here (no external artwork):
 
   chat/assets/logo.bin     PIMG: "PIMG", u32 count, per image <HHI (width, height, offset of RGBA bytes); the
                            garlic mark at 48 and 168 px (straight alpha)
   chat/sce_sys/icon0.png   512 x 512 home screen icon
   chat/sce_sys/pic1.png    1920 x 1080 home screen background
+
+The mark is a white garlic bulb in a black Dracula cape, with two fangs. Red, black and white only.
 
 Run: python make_brand.py   (writes build/brand_preview.png too)
 """
@@ -16,6 +18,8 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 ROOT = Path(__file__).resolve().parent.parent
 FONT = ROOT / "pc" / "fonts_libres" / "Selawik" / "selawksb.ttf"   # Selawik Semibold (SIL OFL 1.1)
+if not FONT.exists():
+    FONT = Path(r"C:\Windows\Fonts\segoeuib.ttf")   # same widths as Selawik; used when the OFL face is not checked out
 SS = 4   # supersampling
 
 
@@ -40,73 +44,105 @@ CLOVE = _path((50, 21), ((40, 38), (35, 70), (43, 89.6)), ((47.67, 90.13), (52.3
 SEAMS = [_path((44, 31), ((27, 44), (22, 68), (31, 87))), _path((56, 31), ((73, 44), (78, 68), (69, 87)))]
 
 
+# Cape on the same 100-unit grid: high collar, wings past the bulb, hem at the bottom.
+CAPE = [(6, 96), (2, 50), (16, 32), (30, 18), (40, 30), (50, 10), (60, 30), (70, 18), (84, 32), (98, 50), (94, 96)]
+LINING = [(18, 94), (14, 56), (28, 40), (40, 34), (50, 26), (60, 34), (72, 40), (86, 56), (82, 94)]
+FANGS = [[(40, 76), (45, 104), (51, 80)], [(49, 80), (55, 104), (60, 76)]]
+
+
+def _poly(draw, pts, k, fill):
+    draw.polygon([(x * k, y * k) for x, y in pts], fill=fill)
+
+
 def garlic(size):
-    """The mark: a closed garlic bulb with a short tip, in warm off-white."""
+    """White garlic bulb, black Dracula cape with a red lining, two fangs."""
     S = size * SS
     img = Image.new("RGBA", (S, S), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
     k = S / 100
-    d.polygon([(x * k, y * k) for x, y in BULB], fill=(230, 218, 196, 255))
-    d.polygon([(x * k, y * k) for x, y in CLOVE], fill=(246, 240, 228, 255))
+    _poly(d, CAPE, k, (8, 8, 8, 255))
+    _poly(d, LINING, k, (176, 16, 32, 255))
+    _poly(d, BULB, k, (244, 244, 244, 255))
+    _poly(d, CLOVE, k, (255, 255, 255, 255))
     for seam in SEAMS:
-        d.line([(x * k, y * k) for x, y in seam], fill=(201, 184, 156, 255), width=max(1, int(0.014 * S)), joint="curve")
-    # soft highlight on the middle clove
+        d.line([(x * k, y * k) for x, y in seam], fill=(150, 150, 150, 255), width=max(1, int(0.014 * S)), joint="curve")
+    # a short red mouth, then the fangs in front of it
+    d.polygon([(38 * k, 74 * k), (62 * k, 74 * k), (58 * k, 80 * k), (42 * k, 80 * k)], fill=(122, 12, 24, 255))
+    for fang in FANGS:
+        _poly(d, fang, k, (255, 255, 255, 255))
     mask = Image.new("L", img.size, 0)
-    ImageDraw.Draw(mask).ellipse([0.43 * S, 0.40 * S, 0.49 * S, 0.66 * S], fill=150)
-    mask = mask.filter(ImageFilter.GaussianBlur(0.025 * S))
+    ImageDraw.Draw(mask).ellipse([0.43 * S, 0.38 * S, 0.50 * S, 0.58 * S], fill=140)
+    mask = mask.filter(ImageFilter.GaussianBlur(0.02 * S))
     white = Image.new("RGBA", img.size, (255, 255, 255, 255))
     white.putalpha(Image.composite(mask, Image.new("L", img.size, 0), img.getchannel("A")))
     img.alpha_composite(white)
-    shade = Image.new("L", img.size, 0)   # a little shadow under the bulb
-    ImageDraw.Draw(shade).ellipse([0.14 * S, 0.72 * S, 0.86 * S, 0.96 * S], fill=70)
-    shade = shade.filter(ImageFilter.GaussianBlur(0.05 * S))
-    dark = Image.new("RGBA", img.size, (120, 98, 70, 255))
-    dark.putalpha(Image.composite(shade, Image.new("L", img.size, 0), img.getchannel("A")))
-    img.alpha_composite(dark)
     return img.resize((size, size), Image.LANCZOS)
 
 
-def blue_background(w, h, glow_at=(0.5, 0.75), glow_r=0.7):
+def night_background(w, h, glow_at=(0.5, 0.75), glow_r=0.7):
+    """Black field with a red pool of light."""
     img = Image.new("RGB", (w, h))
     px = img.load()
     gx, gy = glow_at[0] * w, glow_at[1] * h
     R = glow_r * max(w, h)
     for y in range(h):
         t = y / (h - 1)
-        top = (11, 30, 64)
-        bot = (4, 10, 26)
+        top = (32, 6, 8)
+        bot = (0, 0, 0)
         base = [top[i] + (bot[i] - top[i]) * t for i in range(3)]
         for x in range(w):
             dist = math.hypot(x - gx, y - gy) / R
             g = max(0.0, 1 - dist) ** 2
-            px[x, y] = tuple(int(base[i] + g * (0, 70, 160)[i] * 0.55) for i in range(3))
+            px[x, y] = tuple(min(255, int(base[i] + g * (150, 8, 16)[i] * 0.65)) for i in range(3))
     return img
 
 
 def icon():
     W = 512
-    img = blue_background(W, W, (0.5, 0.42), 0.75).convert("RGBA")
-    g = garlic(300)
+    img = night_background(W, W, (0.5, 0.40), 0.8).convert("RGBA")
+    g = garlic(340)
     glow = Image.new("RGBA", (W, W), (0, 0, 0, 0))
-    ImageDraw.Draw(glow).ellipse([116, 56, 396, 336], fill=(63, 169, 245, 90))
-    img.alpha_composite(glow.filter(ImageFilter.GaussianBlur(40)))
-    img.alpha_composite(g, (106, 38))
-    f = ImageFont.truetype(str(FONT), 66)
+    ImageDraw.Draw(glow).ellipse([90, 30, 422, 360], fill=(176, 16, 32, 80))
+    img.alpha_composite(glow.filter(ImageFilter.GaussianBlur(36)))
+    img.alpha_composite(g, (86, 8))
+    f = ImageFont.truetype(str(FONT), 54)
     d = ImageDraw.Draw(img)
-    text = "Garlic LLM"
+    text = "DarkGarlic"
     tw = d.textlength(text, font=f)
     d.text(((W - tw) / 2, 372), text, font=f, fill=(255, 255, 255))
-    d.rectangle([W / 2 - 40, 462, W / 2 + 40, 466], fill=(63, 169, 245))
+    sub = ImageFont.truetype(str(FONT), 28)
+    sw = d.textlength("LLM", font=sub)
+    d.text(((W - sw) / 2, 432), "LLM", font=sub, fill=(255, 42, 48))
+    d.rectangle([W / 2 - 36, 470, W / 2 + 36, 474], fill=(176, 16, 32))
     return img.convert("RGB")
 
 
 def background():
     W, H = 1920, 1080
-    small = blue_background(W // 4, H // 4, (0.72, 0.55), 0.6).resize((W, H), Image.BICUBIC).convert("RGBA")
-    g = garlic(620)
-    g.putalpha(g.getchannel("A").point(lambda a: a * 0.16))
-    small.alpha_composite(g, (1150, 260))
+    small = night_background(W // 4, H // 4, (0.72, 0.55), 0.65).resize((W, H), Image.BICUBIC).convert("RGBA")
+    g = garlic(640)
+    g.putalpha(g.getchannel("A").point(lambda a: int(a * 0.34)))
+    small.alpha_composite(g, (1140, 220))
     return small.convert("RGB")
+
+
+def hero():
+    """Title card for the README: the mark and the wordmark on a clean black and red field."""
+    img = night_background(1920, 1080, (0.5, 0.38), 0.85).convert("RGBA")
+    g = garlic(480)
+    img.alpha_composite(g, ((1920 - 480) // 2, 90))
+    d = ImageDraw.Draw(img)
+    big = ImageFont.truetype(str(FONT), 88)
+    small = ImageFont.truetype(str(FONT), 40)
+    name, sub = "DarkGarlic", "LLM"
+    nw, sw = d.textlength(name, font=big), d.textlength(sub, font=small)
+    gap = 24
+    x = (1920 - (nw + gap + sw)) / 2
+    y = 680
+    d.text((x, y), name, font=big, fill=(255, 255, 255))
+    d.text((x + nw + gap, y + 42), sub, font=small, fill=(255, 42, 48))
+    d.rectangle([(1920 - 96) / 2, 820, (1920 + 96) / 2, 826], fill=(176, 16, 32))
+    return img.convert("RGB")
 
 
 def main():
@@ -124,6 +160,7 @@ def main():
     ic.save(sce / "icon0.png")
     bg = background()
     bg.save(sce / "pic1.png")
+    hero().save(ROOT / "docs" / "chat.png")
     prev = Image.new("RGB", (512 + 20 + 960, 540), (20, 20, 20))
     prev.paste(ic, (0, 14))
     prev.paste(bg.resize((960, 540)), (532, 0))

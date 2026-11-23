@@ -79,6 +79,10 @@ static const GpuKernel* kern_opt(Engine* e, const char* name) {
 int spec_init(Engine* e, const char* dir) {
     Spec* s = &g_spec;
     memset(s, 0, sizeof(*s));
+    // Cluster shards: no MTP head yet (it needs the last hidden row and the embedding on one console; ROADMAP). A
+    // model from /data/darkgarlic takes its mtp.idx from there too, never the package's (another model's head).
+    if (e->shard) return -1;
+    if (e->model_dir[0]) dir = e->model_dir;
     char p[256];
     size_t sz;
     snprintf(p, sizeof(p), "%s/mtp.idx", dir);
@@ -145,7 +149,7 @@ static uint64_t spec_layout(Engine* e, uint64_t base) {
     uint64_t H = e->hidden, R = e->pf_rows;
     uint32_t nl = 0, ld = 0, npad = e->t[e->head_idx].rows;
     for (uint32_t i = 0; i < e->n_layers; i++)
-        if (!(e->full_mask >> i & 1)) nl++, ld = e->t[e->layer_base[i] + 2].rows;
+        if (!(layer_full(e, i))) nl++, ld = e->t[e->layer_base[i] + 2].rows;
     TAKE(E, R * H * 4);
     TAKE(Hc, (R + 1) * H * 4);
     TAKE(X, R * 2 * H * 4);
@@ -398,7 +402,7 @@ static int spec_verify(Engine* e, uint32_t tok, uint32_t pos, uint32_t K, float 
     uint32_t li = 0;
     for (uint32_t i = 0; i < e->n_layers; i++) {
         uint32_t b = e->layer_base[i];
-        int full = e->full_mask >> i & 1;
+        int full = layer_full(e, i);
         uint32_t mlp = b + (full ? 6 : 8);
         uint64_t kc = e->kc[i], vc = e->vc[i];
         dispatch(e, e->k_rmsr, args(e, "pppuf", e->pf_x, W(e, b), e->pf_xn, H, (double)e->eps), n, 256);
@@ -454,7 +458,7 @@ static int spec_verify(Engine* e, uint32_t tok, uint32_t pos, uint32_t K, float 
     // commit: each DeltaNet state moved forward by the tokens kept
     li = 0;
     for (uint32_t i = 0; i < e->n_layers; i++) {
-        if (e->full_mask >> i & 1) continue;
+        if (layer_full(e, i)) continue;
         uint32_t b = e->layer_base[i], ld = e->t[b + 2].rows;
         uint64_t raw = s->raw + (uint64_t)li * (SPEC_KMAX + 1) * e->conv_n * 4;
         uint64_t xs = s->xs + (uint64_t)li * (SPEC_KMAX + 1) * ld * 4;

@@ -1,5 +1,5 @@
-// Garlic LLM user interface (see ui.h). Software rendering into `back` (1920 x 1080, 0x80RRGGBB): a dark,
-// blue theme; anti-aliased shapes from signed distances; bitmap fonts from pc/export_chat.py; a small markdown
+// DarkGarlic LLM user interface (see ui.h). Software rendering into `back` (1920 x 1080, 0x80RRGGBB): a dark
+// red, black and white theme; anti-aliased shapes from signed distances; bitmap fonts from pc/export_chat.py; a small markdown
 // renderer (headings, lists, bold, italics, code, quotes, tables); the chat, the keyboard and the voice screens.
 #include "ui.h"
 
@@ -12,23 +12,23 @@
 #endif
 
 // ---- theme ---------------------------------------------------------------------------------------------------
-#define C_BG_TOP 0x0B1C3A
-#define C_BG_BOT 0x040A18
-#define C_ACCENT 0x0070D1
-#define C_ACCENT_HI 0x3FA9F5
-#define C_TEXT 0xE8EFFA
-#define C_TEXT_DIM 0xA3B5D2
-#define C_TEXT_MUTED 0x6A80A3
-#define C_SURFACE 0x0E1D3A
-#define C_SURFACE_HI 0x15284B
-#define C_LINE 0x1C3358
-#define C_LINE_HI 0x2A4672
-#define C_USER 0x0B5DC6
-#define C_PANEL 0x0A1631
-#define C_KEY 0x152A4E
-#define C_KEY_SPECIAL 0x0F1F3E
-#define C_GREEN 0x3DDC97
-#define C_RED 0xFF6B76
+#define C_BG_TOP 0x140608
+#define C_BG_BOT 0x000000
+#define C_ACCENT 0x8E1020
+#define C_ACCENT_HI 0xFF2A30
+#define C_TEXT 0xFFFFFF
+#define C_TEXT_DIM 0xD4D4D4
+#define C_TEXT_MUTED 0x8A8A8A
+#define C_SURFACE 0x12080A
+#define C_SURFACE_HI 0x241014
+#define C_LINE 0x3A1418
+#define C_LINE_HI 0x6E2430
+#define C_USER 0x6A1020
+#define C_PANEL 0x080406
+#define C_KEY 0x1A0C10
+#define C_KEY_SPECIAL 0x10080A
+#define C_GREEN 0xF2F2F2
+#define C_RED 0xFF2A30
 #define C_CROSS 0x8AB4FF
 #define C_CIRCLE 0xFF7A85
 #define C_TRIANGLE 0x45D6A0
@@ -104,13 +104,13 @@ static const char* strings[N_STRINGS][N_LANGS] = {
                       "Нажмите кнопку PS, чтобы выйти."},
     [S_OFFLINE] = {"100 % sin conexión", "100% offline", "100% offline", "100% офлайн"},
     [S_SYSTEM_PROMPT] = {
-        "Eres Garlic LLM, un asistente útil que funciona sin internet en la GPU de una PlayStation 4. "
+        "Eres DarkGarlic LLM, un asistente útil que funciona sin internet en la GPU de una PlayStation 4. "
         "Responde en el idioma del usuario, de forma clara y sin rodeos.",
-        "You are Garlic LLM, a helpful assistant running offline on a PlayStation 4's GPU. Answer in the "
+        "You are DarkGarlic LLM, a helpful assistant running offline on a PlayStation 4's GPU. Answer in the "
         "user's language, clearly and directly.",
-        "Você é o Garlic LLM, um assistente útil que funciona sem internet na GPU de um PlayStation 4. "
+        "Você é o DarkGarlic LLM, um assistente útil que funciona sem internet na GPU de um PlayStation 4. "
         "Responda no idioma do usuário, de forma clara e direta.",
-        "Ты — Garlic LLM, полезный ассистент, который работает без интернета на GPU PlayStation 4. Отвечай на "
+        "Ты — DarkGarlic LLM, полезный ассистент, который работает без интернета на GPU PlayStation 4. Отвечай на "
         "языке пользователя, ясно и по делу."},
     [S_LOCAL_GPU] = {"GPU local", "local GPU", "GPU local", "локальный GPU"},
     [S_PY_RUN] = {"Ejecutar Python", "Run Python", "Executar Python", "Запустить Python"},
@@ -135,22 +135,22 @@ static const char* strings[N_STRINGS][N_LANGS] = {
         "Я запустил твою программу прямо здесь, на PS4, и она завершилась с ошибкой:"},
     // "Ask for a fix", the request: lists what Garlic's Python has and what it lacks
     [S_PY_FIX_ASK] = {
-        "Corrígelo para el Python 3 de Garlic (MicroPython): hay turtle, pygame y tkinter adaptados a la tele "
+        "Corrígelo para el Python 3 de DarkGarlic (MicroPython): hay turtle, pygame y tkinter adaptados a la tele "
         "(las flechas, Espacio y Enter van al mando), input(), print(), random, math, time, collections, "
         "itertools, string y copy; no hay numpy, matplotlib, archivos, red ni sonido. Casi siempre el fallo "
         "está en el propio código: busca la causa y corrígela sin quitar nada de lo pedido. Escribe el "
         "programa completo en un solo bloque ```python.",
-        "Fix it for Garlic's Python 3 (MicroPython): it has turtle, pygame and tkinter adapted to the TV "
+        "Fix it for DarkGarlic's Python 3 (MicroPython): it has turtle, pygame and tkinter adapted to the TV "
         "(arrows, Space and Enter are on the controller), input(), print(), random, math, time, collections, "
         "itertools, string and copy; there is no numpy, matplotlib, files, network or sound. The bug is "
         "almost always in the code itself: find the cause and fix it without dropping anything that was asked "
         "for. Write the whole program in a single ```python block.",
-        "Corrija-o para o Python 3 do Garlic (MicroPython): há turtle, pygame e tkinter adaptados à TV (as "
+        "Corrija-o para o Python 3 do DarkGarlic (MicroPython): há turtle, pygame e tkinter adaptados à TV (as "
         "setas, Espaço e Enter ficam no controle), input(), print(), random, math, time, collections, "
         "itertools, string e copy; não há numpy, matplotlib, arquivos, rede nem som. Quase sempre a falha "
         "está no próprio código: encontre a causa e corrija sem tirar nada do que foi pedido. Escreva o "
         "programa completo em um único bloco ```python.",
-        "Исправь её для Python 3 в Garlic (MicroPython): есть turtle, pygame и tkinter для телевизора "
+        "Исправь её для Python 3 в DarkGarlic (MicroPython): есть turtle, pygame и tkinter для телевизора "
         "(стрелки, пробел и Enter — на геймпаде), input(), print(), random, math, time, collections, "
         "itertools, string и copy; нет numpy, matplotlib, файлов, сети и звука. Почти всегда ошибка в самом "
         "коде: найди причину и исправь её, ничего не убирая из того, что просили. Напиши всю программу "
@@ -160,8 +160,8 @@ static const char* strings[N_STRINGS][N_LANGS] = {
     [S_THINKING] = {"Pensando…", "Thinking…", "Pensando…", "Думаю…"},
     [S_LISTENING_SHORT] = {"Te escucho…", "Listening…", "Estou ouvindo…", "Слушаю…"},
     [S_VOICE_LOADING] = {"Preparando la voz…", "Getting the voice ready…", "Preparando a voz…", "Готовлю голос…"},
-    [S_VOICE_NO_TTS] = {"La voz no está disponible: Garlic responderá con texto", "The voice is not available: Garlic will answer in text",
-                        "A voz não está disponível: o Garlic responderá em texto", "Голос недоступен: Garlic ответит текстом"},
+    [S_VOICE_NO_TTS] = {"La voz no está disponible: DarkGarlic responderá con texto", "The voice is not available: DarkGarlic will answer in text",
+                        "A voz não está disponível: o DarkGarlic responderá em texto", "Голос недоступен: DarkGarlic ответит текстом"},
     // "Think" (R3)
     [S_THINK_OFF_HINT] = {"Pensar: no", "Think: off", "Pensar: não", "Думать: нет"},
     [S_THINK_ON_HINT] = {"Pensar: sí", "Think: on", "Pensar: sim", "Думать: да"},
@@ -411,10 +411,10 @@ static void make_background(void) {
             g = g > 0 ? g * g * 0.55f : 0;
             seed = seed * 1664525u + 1013904223u;
             float dither = ((seed >> 24) / 255.0f - 0.5f) * 1.2f;   // breaks up banding in the gradient
-            int r = (int)(base[0] + g * 6 + dither), gr = (int)(base[1] + g * 34 + dither), b = (int)(base[2] + g * 80 + dither);
+            int r = (int)(base[0] + g * 78 + dither), gr = (int)(base[1] + g * 4 + dither), b = (int)(base[2] + g * 6 + dither);
             r = r < 0 ? 0 : r > 255 ? 255 : r, gr = gr < 0 ? 0 : gr > 255 ? 255 : gr, b = b < 0 ? 0 : b > 255 ? 255 : b;
             if (y < HEADER_H || y >= SCREEN_H - FOOTER_H) {   // header and footer bars: darker
-                r = r * 5 / 9 + 1, gr = gr * 5 / 9 + 3, b = b * 5 / 9 + 8;
+                r = r * 5 / 9 + 6, gr = gr * 5 / 9 + 1, b = b * 5 / 9 + 1;
                 if (y == HEADER_H - 1 || y == SCREEN_H - FOOTER_H) r = C_LINE >> 16, gr = C_LINE >> 8 & 255, b = C_LINE & 255;
             }
             bg[y * SCREEN_W + x] = 0x80000000 | r << 16 | gr << 8 | b;
@@ -450,7 +450,7 @@ void ui_free_caches(void) {
 // Darkens the area between the header and the footer by half (cheap: one shift per pixel).
 void ui_dim(void) {
     for (uint32_t* p = back + HEADER_H * SCREEN_W; p < back + (SCREEN_H - FOOTER_H) * SCREEN_W; p++)
-        *p = 0x80000000 | ((*p & 0xFEFEFE) >> 1) + 0x010307;
+        *p = 0x80000000 | ((*p & 0xFEFEFE) >> 1) + 0x040101;
 }
 
 // Rows y0..y1 fade from the background (alpha a0) to the current picture (a1): soft edges for scrolled text.
@@ -935,7 +935,7 @@ static void draw_table_line(const char* a, const char* b, int x, int top, int h,
         fill(xs[0], top, xs[n] - xs[0] + 2, 2, kind == 'M' ? C_ACCENT : C_LINE_HI);
         return;
     }
-    if (header) fill(xs[0], top, xs[n] - xs[0], h, 0x12274C);
+    if (header) fill(xs[0], top, xs[n] - xs[0], h, 0x1A0A0E);
     for (int i = 0; i <= n; i++) fill(xs[i], top, 2, h, C_LINE_HI);
     const Font* f = header ? &font_bold : &font;
     for (int i = 0; i < n && p <= b; i++) {
@@ -954,8 +954,8 @@ enum { DECO_NONE, DECO_CODE_TOP, DECO_CODE, DECO_CODE_BOT, DECO_TABLE, DECO_HR }
 typedef struct {
     uint32_t text, strong, italic, code, code_bg, link, head, quote, marker;
 } Palette;
-static const Palette PAL_AI = {C_TEXT, 0xFFFFFF, 0xD2E2F8, 0x9CD6FF, 0x10264D, 0x63BBFF, 0xFFFFFF, 0xA8BAD6, C_ACCENT_HI};
-static const Palette PAL_USER = {0xFFFFFF, 0xFFFFFF, 0xE6F0FF, 0xFFFFFF, 0x0A4AA6, 0xDDEEFF, 0xFFFFFF, 0xDCE9FF, 0xCFE6FF};
+static const Palette PAL_AI = {C_TEXT, 0xFFFFFF, 0xF0D0D0, 0xFFB4B4, 0x2A0C10, 0xFF6A6A, 0xFFFFFF, 0xC8C8C8, C_ACCENT_HI};
+static const Palette PAL_USER = {0xFFFFFF, 0xFFFFFF, 0xFFD6D6, 0xFFFFFF, 0x4A0814, 0xFFE4E4, 0xFFFFFF, 0xF4D0D0, 0xFFD0D0};
 static const Palette PAL_NOTE = {C_TEXT_MUTED, C_TEXT_DIM, C_TEXT_MUTED, C_TEXT_DIM, C_SURFACE, C_TEXT_DIM, C_TEXT_DIM,
                                  C_TEXT_MUTED, C_TEXT_MUTED};
 static const Palette PAL_FIELD = {C_TEXT, C_TEXT, C_TEXT, C_TEXT, 0, C_TEXT, C_TEXT, C_TEXT, C_TEXT};
@@ -1281,13 +1281,13 @@ static void layout_build(Layout* L, const char* src, size_t len, int width, cons
                 utf8_next(&nx);
                 int cw = text_width(&mono, c, nx);
                 if (x + cw > width - code_pad && c > run_s) {
-                    add_run(L, &mono, 0xC7E2FF, run_x, x - run_x, run_s, c, 0);
+                    add_run(L, &mono, 0xF3D0D0, run_x, x - run_x, run_s, c, 0);
                     end_line(L, lh, 2 + mono.ascent, DECO_CODE, 0);
                     run_s = c, x = run_x = code_pad + 2 * mono.space;
                 }
                 x += cw, c = nx;
             }
-            if (e > run_s) add_run(L, &mono, 0xC7E2FF, run_x, x - run_x, run_s, e, 0);
+            if (e > run_s) add_run(L, &mono, 0xF3D0D0, run_x, x - run_x, run_s, e, 0);
             end_line(L, lh, 2 + mono.ascent, DECO_CODE, 0);
         } else if (*s == '\x01') {   // table row
             if (s[1] == 'T') header = 1;
@@ -1371,7 +1371,7 @@ static void draw_layout(const Layout* L, int ox, int oy) {
             int j = i;
             while (j + 1 < L->n_lines && L->lines[j].deco != DECO_CODE_BOT) j++;
             int bottom = oy + L->lines[j].y + L->lines[j].h;
-            rrect(ox, ly, L->width, bottom - ly, 14, 0x061127, 255);
+            rrect(ox, ly, L->width, bottom - ly, 14, 0x0C0607, 255);
             rrect_line(ox, ly, L->width, bottom - ly, 14, 1, C_LINE, 255);
         }
         if (ly + ln->h < clip_y0) continue;
@@ -1409,8 +1409,8 @@ static int draw_btn(int btn, int x, int cy) {
     const int d = 34;
     float cx = x + d * 0.5f;
     if (btn <= BTN_SQUARE || btn == BTN_UPDOWN) {
-        circle(cx, cy, d * 0.5f, 0, 0x1A2D52, 255);
-        circle(cx, cy, d * 0.5f, 1.2f, 0x34548A, 255);
+        circle(cx, cy, d * 0.5f, 0, 0x1A0C10, 255);
+        circle(cx, cy, d * 0.5f, 1.2f, 0x5A1822, 255);
         switch (btn) {
         case BTN_CROSS:
             line(cx - 6.5f, cy - 6.5f, cx + 6.5f, cy + 6.5f, 3.2f, C_CROSS, 255);
@@ -1424,10 +1424,10 @@ static int draw_btn(int btn, int x, int cy) {
             break;
         case BTN_SQUARE: rrect_line((int)cx - 8, cy - 8, 16, 16, 2, 3, C_SQUARE, 255); break;
         default:   // up / down
-            line(cx - 5, cy - 3, cx, cy - 8, 2.6f, 0xDCE6F5, 255);
-            line(cx, cy - 8, cx + 5, cy - 3, 2.6f, 0xDCE6F5, 255);
-            line(cx - 5, cy + 3, cx, cy + 8, 2.6f, 0xDCE6F5, 255);
-            line(cx, cy + 8, cx + 5, cy + 3, 2.6f, 0xDCE6F5, 255);
+            line(cx - 5, cy - 3, cx, cy - 8, 2.6f, 0xF4F4F4, 255);
+            line(cx, cy - 8, cx + 5, cy - 3, 2.6f, 0xF4F4F4, 255);
+            line(cx - 5, cy + 3, cx, cy + 8, 2.6f, 0xF4F4F4, 255);
+            line(cx, cy + 8, cx + 5, cy + 3, 2.6f, 0xF4F4F4, 255);
         }
         return d;
     }
@@ -1437,9 +1437,9 @@ static int draw_btn(int btn, int x, int cy) {
     int w = str_width(&font_small, s) + 20, h = 30;
     int rad[4] = {8, 8, 8, 8};
     if (btn == BTN_L2 || btn == BTN_R2) rad[0] = rad[1] = 14, rad[2] = rad[3] = 6;
-    rrect4(x, cy - h / 2, w, h, rad, 0, 0x1A2D52, 255);
-    rrect4(x, cy - h / 2, w, h, rad, 1, 0x34548A, 255);
-    draw_str(&font_small, x + 10, cy - font_small.line / 2, s, 0xDCE6F5);
+    rrect4(x, cy - h / 2, w, h, rad, 0, 0x1A0C10, 255);
+    rrect4(x, cy - h / 2, w, h, rad, 1, 0x5A1822, 255);
+    draw_str(&font_small, x + 10, cy - font_small.line / 2, s, 0xF4F4F4);
     return w;
 }
 
@@ -1486,7 +1486,7 @@ static void fmt_k(char* out, int n) {   // 1234 -> "1.2k"
 static int chip(int x_right, int cy, const char* text, uint32_t color, uint32_t dot, float dot_alpha, int bar_frac_x1000) {
     int tw = str_width(&font_small, text);
     int w = tw + 36 + (dot ? 20 : 0) + (bar_frac_x1000 >= 0 ? 96 : 0), h = 44, x = x_right - w;
-    rrect(x, cy - h / 2, w, h, h / 2, 0x0D1D3B, 230);
+    rrect(x, cy - h / 2, w, h, h / 2, 0x12080A, 230);
     rrect_line(x, cy - h / 2, w, h, h / 2, 1, C_LINE_HI, 255);
     int tx = x + 18;
     if (dot) {
@@ -1496,18 +1496,23 @@ static int chip(int x_right, int cy, const char* text, uint32_t color, uint32_t 
     draw_str(&font_small, tx, cy - font_small.line / 2, text, color);
     if (bar_frac_x1000 >= 0) {
         int bx = tx + tw + 14;
-        rrect(bx, cy - 3, 78, 6, 3, 0x1B3156, 255);
+        rrect(bx, cy - 3, 78, 6, 3, 0x2A1216, 255);
         int fw = 78 * bar_frac_x1000 / 1000;
-        if (fw > 0) rrect(bx, cy - 3, fw < 6 ? 6 : fw, 6, 3, bar_frac_x1000 > 850 ? 0xF2A65A : C_ACCENT_HI, 255);
+        if (fw > 0) rrect(bx, cy - 3, fw < 6 ? 6 : fw, 6, 3, bar_frac_x1000 > 850 ? 0xFFFFFF : C_ACCENT_HI, 255);
     }
     return x;
+}
+
+// Product wordmark: "DarkGarlic" in white, "LLM" in red. Returns the x after the last glyph.
+static int draw_wordmark(int x, int y) {
+    x = draw_str(&font_big, x, y, "DarkGarlic", 0xFFFFFF);
+    return draw_str(&font_big, x + font_big.space, y, "LLM", C_ACCENT_HI);
 }
 
 static void draw_header(const ChatView* v) {
     draw_image(&logo_s, 64, (HEADER_H - logo_s.h) / 2 - 2, 255);
     int tx = 64 + (logo_s.w ? logo_s.w + 14 : 0);
-    tx = draw_str(&font_big, tx, (HEADER_H - font_big.line) / 2, "Garlic", 0xFFFFFF);
-    draw_str(&font_big, tx + font_big.space, (HEADER_H - font_big.line) / 2, "LLM", C_ACCENT_HI);
+    draw_wordmark(tx, (HEADER_H - font_big.line) / 2);
     int cy = HEADER_H / 2, x = SCREEN_W - 64;
     char a[24], b[24], ctx[96];
     fmt_k(a, v->pos), fmt_k(b, v->max_seq);
@@ -1558,7 +1563,7 @@ static void draw_thinking(const ChatView* v, int x, int y, int w) {
     snprintf(s, sizeof(s), "%d / %d  ·  %d s", v->think_n, v->think_cap, (int)v->think_s);
     draw_str(&font_small, x + w - str_width(&font_small, s), cy - font_small.line / 2, s, C_TEXT_MUTED);
     int by = y + THINK_HEAD_H - 4, n = v->think_n < v->think_cap ? v->think_n : v->think_cap;
-    rrect(x, by, w, 4, 2, 0x1B3156, 255);
+    rrect(x, by, w, 4, 2, 0x2A1216, 255);
     int fw = v->think_cap > 0 ? (int)((long long)w * n / v->think_cap) : 0;
     if (fw > 0) rrect(x, by, fw < 4 ? 4 : fw, 4, 2, C_ACCENT_HI, 255);
     int py = y + THINK_HEAD_H + 8, ph = 2 * THINK_PAD + THINK_LINES * TEXT_LINE_H - 8;
@@ -1629,10 +1634,9 @@ static void draw_empty(const ChatView* v) {
     circle(cx, y + logo_l.h / 2, 92, 0, C_ACCENT_HI, 26);
     draw_image(&logo_l, cx - logo_l.w / 2, y, 255);
     y += logo_l.h + 26;
-    int w1 = str_width(&font_big, "Garlic"), w2 = str_width(&font_big, "LLM");
+    int w1 = str_width(&font_big, "DarkGarlic"), w2 = str_width(&font_big, "LLM");
     int x = cx - (w1 + font_big.space + w2) / 2;
-    x = draw_str(&font_big, x, y, "Garlic", 0xFFFFFF);
-    draw_str(&font_big, x + font_big.space, y, "LLM", C_ACCENT_HI);
+    draw_wordmark(x, y);
     y += font_big.line + 14;
     char line_[160];
     snprintf(line_, sizeof(line_), tr(S_TAGLINE), v->model ? v->model : "");
@@ -1660,7 +1664,7 @@ void draw_toast(const char* text, float alpha, int y) {
     if (y <= 0) y = SCREEN_H - FOOTER_H - 36;
     text_alpha = (int)(255 * alpha);
     int tw = str_width(&font, text), w = tw + 64, h = 64, x = (SCREEN_W - w) / 2;
-    rrect(x, y - h, w, h, h / 2, 0x16335F, 245);
+    rrect(x, y - h, w, h, h / 2, 0x1C0A0E, 245);
     rrect_line(x, y - h, w, h, h / 2, 1, C_ACCENT_HI, 140);
     draw_str(&font, x + 32, y - h + (h - font.line) / 2, text, 0xFFFFFF);
     text_alpha = 255;
@@ -1704,7 +1708,7 @@ void draw_chat(ChatView* v) {
                     fill(nx + L->max_w + 30, y + h / 2, COL_X + COL_W - 120 - nx - L->max_w - 30, 1, C_LINE);
                     draw_layout(L, nx, y + 4);
                 } else {
-                    circle(COL_X + 28, y + 28, 28, 0, 0x10244A, 255);
+                    circle(COL_X + 28, y + 28, 28, 0, 0x14080C, 255);
                     circle(COL_X + 28, y + 28, 28, 1.2f, C_LINE_HI, 255);
                     if (logo_s.px) draw_image(&logo_s, COL_X + 28 - logo_s.w / 2, y + 28 - logo_s.h / 2, 255);
                     int tx = COL_X + AI_INDENT, ty = y + 4;
@@ -1741,7 +1745,7 @@ void draw_chat(ChatView* v) {
             int th = track * view / total;
             if (th < 40) th = 40;
             int ty = area_top + (track - th) * (max_scroll - v->scroll) / max_scroll;
-            rrect(x, area_top, 6, track, 3, 0x12244A, 255);
+            rrect(x, area_top, 6, track, 3, 0x1A0C10, 255);
             rrect(x, ty, 6, th, 3, C_ACCENT_HI, 200);
         }
     }
@@ -1785,17 +1789,16 @@ static void brand_block(int y) {
     circle(cx, y + logo_l.h / 2, 98, 0, C_ACCENT_HI, 22);
     draw_image(&logo_l, cx - logo_l.w / 2, y, 255);
     y += logo_l.h + 28;
-    int w1 = str_width(&font_big, "Garlic"), w2 = str_width(&font_big, "LLM");
+    int w1 = str_width(&font_big, "DarkGarlic"), w2 = str_width(&font_big, "LLM");
     int x = cx - (w1 + font_big.space + w2) / 2;
-    x = draw_str(&font_big, x, y, "Garlic", 0xFFFFFF);
-    draw_str(&font_big, x + font_big.space, y, "LLM", C_ACCENT_HI);
+    draw_wordmark(x, y);
 }
 
 void draw_loading(float frac, const char* what) {
     draw_background();
     brand_block(270);
     int cx = SCREEN_W / 2, y = 600, w = 560;
-    rrect(cx - w / 2, y, w, 10, 5, 0x12264A, 255);
+    rrect(cx - w / 2, y, w, 10, 5, 0x1A0C10, 255);
     int fw = (int)(w * clamp01(frac));
     if (fw > 0) {
         rrect(cx - w / 2, y, fw < 10 ? 10 : fw, 10, 5, C_ACCENT, 255);
@@ -1978,7 +1981,7 @@ int kb_press(Kb* kb, char* out, int max) {
 #define PANEL_Y (SCREEN_H - FOOTER_H - PANEL_H)
 
 static void draw_field(int x, int y, int w, const char* text, double time) {
-    rrect(x, y, w, FIELD_H, 20, 0x050E22, 255);
+    rrect(x, y, w, FIELD_H, 20, 0x070304, 255);
     rrect_line(x, y, w, FIELD_H, 20, 2, C_ACCENT_HI, 170);
     int pad = 28, inner_w = w - 2 * pad;
     int caret_x, caret_y, caret_h;
@@ -2028,7 +2031,7 @@ static void kb_draw_key(const Kb* kb, int r, int k, int x0, int y0, int sel) {
     if (sel) {
         rrect(x - 7, ky - 7, w + 14, KEY_H + 14, 20, C_ACCENT_HI, 40);
         rrect(x - 3, ky - 3, w + 6, KEY_H + 6, 16, C_ACCENT_HI, 90);
-        rrect(x, ky, w, KEY_H, 13, 0x1C86EA, 255);
+        rrect(x, ky, w, KEY_H, 13, C_ACCENT, 255);
     } else {
         rrect(x, ky, w, KEY_H, 13, enter ? C_ACCENT : special ? C_KEY_SPECIAL : C_KEY, 255);
         if (on) rrect_line(x, ky, w, KEY_H, 13, 2, C_ACCENT_HI, 255);
@@ -2037,7 +2040,7 @@ static void kb_draw_key(const Kb* kb, int r, int k, int x0, int y0, int sel) {
     const Font* f;
     key_label(kb, key, label, sizeof(label), &f);
     int tw = str_width(f, label);
-    uint32_t col = sel || enter ? 0xFFFFFF : on ? C_ACCENT_HI : special ? C_TEXT_DIM : 0xEEF4FF;
+    uint32_t col = sel || enter ? 0xFFFFFF : on ? C_ACCENT_HI : special ? C_TEXT_DIM : 0xFFFFFF;
     draw_str(f, x + (w - tw) / 2, ky + (KEY_H - f->line) / 2, label, col);
 }
 
@@ -2114,7 +2117,7 @@ void draw_voice(int phase, const float* levels, int n_levels, float secs, float 
             float lv = src >= 0 ? levels[src] : 0;
             int bh = 6 + (int)(lv * 46);
             int bx = cx - total / 2 + i * (bw + gap), by = y + 372 - bh / 2;
-            rrect(bx, by, bw, bh, 4, i > bars - 4 ? C_ACCENT_HI : 0x3C78C8, 255);
+            rrect(bx, by, bw, bh, 4, i > bars - 4 ? C_ACCENT_HI : 0x6E1820, 255);
         }
         const Hint hh[] = {{BTN_SQUARE, S_RELEASE_TO_END}};
         draw_footer(hh, 1, NULL);

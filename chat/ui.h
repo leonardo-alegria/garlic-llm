@@ -1,4 +1,4 @@
-// Garlic LLM user interface: everything that draws (theme, fonts, markdown, chat, keyboard, voice, loading),
+// DarkGarlic LLM user interface: everything that draws (theme, fonts, markdown, chat, keyboard, voice, loading),
 // the chat messages and the on-screen keyboard's logic. No console calls here, so the same code also runs on
 // Windows.
 #pragma once

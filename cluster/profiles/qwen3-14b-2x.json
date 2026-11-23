@@ -1,0 +1,88 @@
+{
+  "name": "Abliterated Qwen3-14B",
+  "preset": "qwen3-14b",
+  "quant": "default",
+  "console": "base",
+  "context": 8192,
+  "nodes": [
+    {
+      "node": 0,
+      "host": "PS4_0_IP",
+      "layers": [
+        0,
+        21
+      ],
+      "has_embed": true,
+      "has_head": false,
+      "weights": "/data/darkgarlic/node0.bin"
+    },
+    {
+      "node": 1,
+      "host": "PS4_1_IP",
+      "layers": [
+        21,
+        40
+      ],
+      "has_embed": false,
+      "has_head": true,
+      "weights": "/data/darkgarlic/node1.bin"
+    }
+  ],
+  "plan": {
+    "model": {
+      "arch": "qwen3",
+      "checkpoint": "Qwen3-14B abliterated (e.g. huihui-ai/Qwen3-14B-abliterated)",
+      "layers": 40,
+      "hidden": 5120,
+      "inter": 17408,
+      "heads": 40,
+      "kv_heads": 8,
+      "head_dim": 128,
+      "vocab": 151936,
+      "keep_vocab": 151936,
+      "mtp": 0
+    },
+    "quant": "default",
+    "console": "base",
+    "nodes": 2,
+    "context": 8192,
+    "total_weights_mib": 6656.4,
+    "embed_rows_on_disk_mib": 417.3,
+    "fits": true,
+    "node_plan": [
+      {
+        "node": 0,
+        "layers": [
+          0,
+          21
+        ],
+        "n_layers": 21,
+        "weights_mib": 3275.5,
+        "cache_mib": 672.0,
+        "used_mib": 4043.5,
+        "free_mib": 500.5,
+        "has_embed": true,
+        "has_head": false
+      },
+      {
+        "node": 1,
+        "layers": [
+          21,
+          40
+        ],
+        "n_layers": 19,
+        "weights_mib": 3380.9,
+        "cache_mib": 608.0,
+        "used_mib": 4084.9,
+        "free_mib": 459.1,
+        "has_embed": false,
+        "has_head": true
+      }
+    ],
+    "est_tokens_per_s_single_stream": 14.5,
+    "kernel_gaps": [
+      "5 query heads per KV head: shaders/attn.h GQ_MAX is 4 (ROADMAP: GQA > 4)",
+      "Qwen3 path has no q4s/q3s converter or batched prompt yet (ROADMAP: Qwen3 q4s)"
+    ]
+  }
+}

@@ -1,0 +1,90 @@
+{
+  "name": "Abliterated Qwen3.5-9B",
+  "preset": "qwen3.5-9b",
+  "quant": "default",
+  "console": "base",
+  "context": 16384,
+  "nodes": [
+    {
+      "node": 0,
+      "host": "PS4_0_IP",
+      "layers": [
+        0,
+        19
+      ],
+      "has_embed": true,
+      "has_head": false,
+      "weights": "/data/darkgarlic/node0.bin"
+    },
+    {
+      "node": 1,
+      "host": "PS4_1_IP",
+      "layers": [
+        19,
+        32
+      ],
+      "has_embed": false,
+      "has_head": true,
+      "weights": "/data/darkgarlic/node1.bin"
+    }
+  ],
+  "plan": {
+    "model": {
+      "arch": "qwen35",
+      "checkpoint": "huihui-ai/Huihui-Qwen3.5-9B-abliterated",
+      "layers": 32,
+      "hidden": 4096,
+      "inter": 12288,
+      "heads": 16,
+      "kv_heads": 4,
+      "head_dim": 256,
+      "lin_k_heads": 16,
+      "lin_v_heads": 32,
+      "lin_dk": 128,
+      "lin_dv": 128,
+      "full_interval": 4,
+      "vocab": 248320,
+      "keep_vocab": 248070,
+      "mtp": 1
+    },
+    "quant": "default",
+    "console": "base",
+    "nodes": 2,
+    "context": 16384,
+    "total_weights_mib": 3880.1,
+    "embed_rows_on_disk_mib": 545.6,
+    "fits": true,
+    "node_plan": [
+      {
+        "node": 0,
+        "layers": [
+          0,
+          19
+        ],
+        "n_layers": 19,
+        "weights_mib": 1983.7,
+        "cache_mib": 112.7,
+        "used_mib": 2192.4,
+        "free_mib": 2351.6,
+        "has_embed": true,
+        "has_head": false
+      },
+      {
+        "node": 1,
+        "layers": [
+          19,
+          32
+        ],
+        "n_layers": 13,
+        "weights_mib": 1896.4,
+        "cache_mib": 100.1,
+        "used_mib": 2092.5,
+        "free_mib": 2451.5,
+        "has_embed": false,
+        "has_head": true
+      }
+    ],
+    "est_tokens_per_s_single_stream": 24.7,
+    "kernel_gaps": []
+  }
+}

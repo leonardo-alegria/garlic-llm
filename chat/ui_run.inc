@@ -270,7 +270,7 @@ void cursor_draw(float sx, float sy) {
     float ox = cv_ox, oy = cv_oy, s = cv_s;
     int c0 = cv_x0, c1 = cv_y0, c2 = cv_x1, c3 = cv_y1;
     cv_ox = 0, cv_oy = 0, cv_s = 1, cv_x0 = 0, cv_y0 = 0, cv_x1 = SCREEN_W, cv_y1 = SCREEN_H;
-    cv_polygon(xy, 3, 1, 0xFFFFFF, 2.0f, 0x0A1630);
+    cv_polygon(xy, 3, 1, 0xFFFFFF, 2.0f, 0x10080A);
     cv_ox = ox, cv_oy = oy, cv_s = s, cv_x0 = c0, cv_y0 = c1, cv_x1 = c2, cv_y1 = c3;
 }
 
@@ -291,7 +291,7 @@ void draw_console(const char* text, size_t len, const char* title, int bottom, i
     const Hint hh[] = {{BTN_CIRCLE, S_PY_EXIT}};
     draw_footer(hh, 1, NULL);
     int x = COL_X - 60, y = HEADER_H + 24, w = COL_W + 120, h = bottom - y - 24;
-    rrect(x, y, w, h, 22, 0x050E22, 255);
+    rrect(x, y, w, h, 22, 0x070304, 255);
     rrect_line(x, y, w, h, 22, 1, C_LINE_HI, 255);
     int pad = 28, maxw = w - 2 * pad, lh = mono.line + 4, rows = (h - 2 * pad) / lh;
     static const char* ls[4096];
@@ -321,7 +321,7 @@ void draw_console(const char* text, size_t len, const char* title, int bottom, i
     if (first < 0) first = 0;
     set_clip(x, y + 8, x + w, y + h - 8);
     for (int i = first, row = 0; i < n && row < rows; i++, row++)
-        draw_text(&mono, x + pad, y + pad + row * lh, ls[i], le[i], 0xD7E6FA);
+        draw_text(&mono, x + pad, y + pad + row * lh, ls[i], le[i], 0xF3D0D0);
     no_clip();
 }
 

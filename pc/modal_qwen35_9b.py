@@ -20,7 +20,7 @@ from pathlib import Path
 import modal
 
 HERE = Path(__file__).resolve().parent
-REPO = "Qwen/Qwen3.5-9B"
+REPO = "huihui-ai/Huihui-Qwen3.5-9B-abliterated"   # same architecture as Qwen/Qwen3.5-9B; refusal direction removed
 NAME = "qwen3.5-9b-mix"
 image = (modal.Image.debian_slim(python_version="3.11")
          .pip_install("torch==2.6.0", "transformers==5.20.1", "safetensors", "numpy>=2", "huggingface_hub",
