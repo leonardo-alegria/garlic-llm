@@ -3,19 +3,11 @@ Garlic LLM
 Modelos de lenguaje: Qwen3.5-9B y Qwen3.5-4B (Alibaba Qwen), licencia Apache 2.0.
 Voz a texto: Parakeet TDT 0.6B v3, NVIDIA (https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3),
              licencia CC-BY 4.0. Pesos cuantizados a 4 bits.
-             Nemotron 3.5 ASR, NVIDIA (https://huggingface.co/nvidia/nemotron-3.5-asr-streaming-0.6b), para
-             árabe, japonés, coreano, chino, turco y vietnamita: licencia OpenMDW 1.1 (texto en
-             LICENCIA_NEMOTRON.txt). Pesos cuantizados a 4 bits; la red «joint», a 8 bits.
-Texto a voz: Chatterbox Multilingual (T3) y Chatterbox-Turbo (S3Gen y HiFT), Resemble AI, licencia MIT.
-             Voces de ruso, árabe y japonés clonadas de grabaciones de Mozilla Common Voice 17 (CC0).
-Lecturas de los kanji: diccionario de pykakasi 2.3.0 (Hiroshi Miura y colaboradores; diccionario de KAKASI
-             de Hironobu Takahashi, Masahiko Sato y otros, y parte de UniDic), licencia GPL-3.0 o posterior.
 Emoji: Twemoji 16.0.1, Copyright 2019 Twitter, Inc. y otros colaboradores,
        https://github.com/jdecked/twemoji, licencia CC-BY 4.0
        (https://creativecommons.org/licenses/by/4.0/). Imágenes escaladas.
-Fuentes: Selawik (Microsoft), Noto Sans, Noto Sans Arabic, Noto Sans Symbols / Symbols 2 / Math, Noto Music,
-         Noto Sans SC, TC, JP y KR, Arimo, Inconsolata, Cascadia Mono (Microsoft): SIL Open Font License 1.1;
-         DejaVu Sans: licencia de
+Fuentes: Selawik (Microsoft), Noto Sans, Noto Sans Symbols / Symbols 2 / Math, Noto Music, Noto Sans SC y KR,
+         Arimo, Inconsolata, Cascadia Mono (Microsoft): SIL Open Font License 1.1; DejaVu Sans: licencia de
          Bitstream Vera y dominio público. Convertidas a mapas de bits. Avisos de copyright y textos de las
          licencias en LICENCIAS_FUENTES.txt.
 Logotipo e icono: dibujados para Garlic LLM (pc/make_brand.py).

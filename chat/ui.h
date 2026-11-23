@@ -14,12 +14,9 @@ void say(const char* fmt, ...);                      // log
 uint8_t* read_all(const char* path, size_t* size);   // whole file, malloc'd
 
 // ---- languages: chosen from the console's system language ----
-// ZH_HANS: Simplified Chinese, ZH_HANT: Traditional Chinese
-enum { LANG_ES, LANG_EN, LANG_PT, LANG_RU, LANG_FR, LANG_DE, LANG_AR, LANG_JA, LANG_ZH_HANS, LANG_ZH_HANT, LANG_KO, N_LANGS };
+enum { LANG_ES, LANG_EN, LANG_PT, LANG_RU, N_LANGS };
 extern int ui_lang;
-extern const char* const lang_codes[N_LANGS];   // "es", "en", ..., "zh-Hans", "zh-Hant", "ko"
 int lang_from_system(int system_lang);   // OrbisSystemParamLanguage -> LANG_*
-int lang_rtl(int lang);                  // written right to left (Arabic)
 
 typedef enum {
     S_TAGLINE, S_EMPTY_HINT, S_WRITE, S_TALK_HOLD, S_STOP, S_NEW_CHAT, S_SCROLL, S_TEMPERATURE, S_CONTEXT,
@@ -30,9 +27,7 @@ typedef enum {
     S_SYSTEM_PROMPT, S_LOCAL_GPU, S_PY_RUN, S_PY_EXIT, S_PY_CLICK, S_PY_RCLICK, S_PY_MOVE, S_PY_KEYS, S_PY_BACK,
     S_PY_AGAIN, S_PY_FIX, S_PY_DONE, S_PY_ERROR, S_PY_STOPPED, S_PY_STARTING, S_PY_FIX_MSG, S_PY_FIX_ASK, S_PY_INPUT, S_VOICE_MODE, S_THINKING, S_LISTENING_SHORT, S_VOICE_LOADING, S_VOICE_NO_TTS,
     S_THINK_OFF_HINT, S_THINK_ON_HINT, S_THINK_ON_TOAST, S_THINK_OFF_TOAST, S_THOUGHT, S_THINK_CUT, S_THINK_CHIP,
-    S_API_ON, S_API_OFF, S_API_FAILED, S_API_BUSY, S_API_DONE, S_KB_SYSTEM,
-    S_MODEL_TITLE, S_MODEL_BUILTIN, S_MODEL_SELECT, S_MODEL_START, S_MODEL_BAD_TITLE, S_MODEL_BAD, S_MODEL_FALLBACK,
-    S_MODEL_CONTINUE, N_STRINGS
+    S_API_ON, S_API_OFF, S_API_FAILED, S_API_BUSY, S_API_DONE, N_STRINGS
 } StrId;
 const char* tr(StrId id);
 
@@ -95,10 +90,6 @@ int ui_screen_pool_mb(void);
 void ui_free_caches(void);      // gives back the backdrop and keyboard copies (8 MB each); they return when needed
 void draw_loading(float frac, const char* what);
 void draw_error(const char* what);
-// The models folder (main.c): the list of models to start (names[0] is the built-in one), a smaller line under each
-// name (notes), sel selected; then, for a chosen model that cannot be used, its name and the file at fault (detail).
-void draw_models(const char* const* names, const char* const* notes, int n, int sel);
-void draw_model_bad(const char* name, const char* detail);
 void draw_toast(const char* text, float alpha, int bottom);   // bottom 0 = above the footer
 
 // ---- footer hints ----
@@ -110,17 +101,13 @@ typedef struct {
 void draw_footer(const Hint* hints, int n, const char* right);
 
 // ---- the on-screen keyboard (drawn by the app, driven by the controller) ----
-// KB_JA: kana (Shift: katakana until pressed again); KB_KO: two-set hangul, jamo joined into syllables. Chinese
-// has no layout here: the system keyboard (OPTIONS) has its input methods.
-enum { KB_ES, KB_EN, KB_PT, KB_RU, KB_FR, KB_DE, KB_AR, KB_JA, KB_KO, N_KB_LAYOUTS };
-int kb_layout_for(int lang);   // the layout the keyboard opens with in a language (LANG_*)
+enum { KB_ES, KB_EN, KB_PT, KB_RU, N_KB_LAYOUTS };
 typedef struct {
     int layout;              // KB_*
-    int home;                // the layout it opened with: the language key goes home -> English -> the others
     int page;                // 0 = letters, 1.. = emoji category
     int row, col;
     int shift;               // one letter in capitals
-    const char* dead;        // pending accent ("´", "~", "^", "`", "¨") or NULL
+    const char* dead;        // pending accent ("´", "~", "^", "`") or NULL
     int last_emoji_page;
 } Kb;
 void kb_init(Kb* kb, int layout);

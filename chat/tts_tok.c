@@ -1,8 +1,7 @@
 // Text tokenizer of Chatterbox Multilingual (see tts_tok.h), the C version of the official Python steps:
-// punc_norm -> lower() -> (Japanese: kanji as hiragana, see ja_kana.h) -> NFKD -> "[lang]" + text -> spaces
-// become [SPACE] -> added tokens matched first -> Whitespace pre-tokenizer (\w+ | [^\w\s]+) -> BPE with the merge
-// ranks -> ids, between start 255 and stop 0. Russian stress marks are added first when their dictionary is loaded
-// (ru_stress.h). The tables (lower case, NFKD, combining classes, \w) cover every codepoint.
+// punc_norm -> lower() -> NFKD -> "[lang]" + text -> spaces become [SPACE] -> added tokens matched first ->
+// Whitespace pre-tokenizer (\w+ | [^\w\s]+) -> BPE with the merge ranks -> ids, between start 255 and stop 0.
+// Russian stress marks are added first when their dictionary is loaded (ru_stress.h).
 #include "tts_tok.h"
 
 #include <stdio.h>
@@ -14,7 +13,7 @@ static uint16_t rd16(const uint8_t* p) { return (uint16_t)(p[0] | p[1] << 8); }
 
 int ttstok_load(TtsTok* t, const uint8_t* d, size_t n) {
     memset(t, 0, sizeof(*t));
-    if (n < 8 || memcmp(d, "PTT2", 4)) return -1;
+    if (n < 8 || memcmp(d, "PTTK", 4)) return -1;
     const uint8_t* p = d + 4;
     t->n_vocab = rd32(p), p += 4;
     t->vocab = malloc(t->n_vocab * sizeof(*t->vocab));
@@ -29,12 +28,8 @@ int ttstok_load(TtsTok* t, const uint8_t* d, size_t n) {
     t->n_nfkd = rd32(p), p += 4;
     t->nfkd = malloc(t->n_nfkd * sizeof(*t->nfkd));
     for (uint32_t i = 0; i < t->n_nfkd; i++) t->nfkd[i] = p, p += 5 + 4 * p[4];
-    t->n_ccc = rd32(p), p += 4;
-    t->ccc = p, p += t->n_ccc * 8;
-    t->n_wr = rd32(p), p += 4;
-    t->wr = p, p += t->n_wr * 8;
     t->word_bits = p;
-    return (size_t)(p + 0x10000 / 8 - d) <= n ? 0 : -1;
+    return (size_t)(p + 0x3000 / 8 - d) <= n ? 0 : -1;
 }
 
 // ---- UTF-8 ----
@@ -80,25 +75,9 @@ static const uint8_t* nfkd_of(const TtsTok* t, uint32_t c) {
     return NULL;
 }
 
-static uint32_t range_of(const uint8_t* r, uint32_t n, uint32_t c) {   // <II (first, last | value << 24) ranges
-    int lo = 0, hi = (int)n - 1;
-    while (lo <= hi) {
-        int m = (lo + hi) / 2;
-        uint32_t a = rd32(r + m * 8), b = rd32(r + m * 8 + 4);
-        if (c < a) hi = m - 1;
-        else if (c > (b & 0xFFFFFF)) lo = m + 1;
-        else return b >> 24 ? b >> 24 : 1;
-    }
-    return 0;
-}
-
-static int is_word(const TtsTok* t, uint32_t c) {   // \w of the pre-tokenizer: letters, marks, digits, '_'
-    if (c < 0x10000) return t->word_bits[c >> 3] >> (c & 7) & 1;
-    return range_of(t->wr, t->n_wr, c) != 0;
-}
-
-static int ccc_of(const TtsTok* t, uint32_t c) {   // canonical combining class (0 for most characters)
-    return c < 0x300 ? 0 : (int)range_of(t->ccc, t->n_ccc, c);
+static int is_word(const TtsTok* t, uint32_t c) {   // Oniguruma \w: letters, marks, numbers, '_'
+    if (c >= 0x3000) return c < 0x1F000;   // CJK and the like are words; emoji and symbols are not
+    return t->word_bits[c >> 3] >> (c & 7) & 1;
 }
 
 static int is_space(uint32_t c) {   // Oniguruma \s (the pre-tokenizer)
@@ -213,38 +192,8 @@ static int pretok_bpe(const TtsTok* t, const char* s, int len, uint16_t* out, in
     return k;
 }
 
-// NFKD of cps[0, n) into out: each codepoint decomposed (Hangul syllables by their formula), then the combining
-// marks of each run put in canonical order (stable by combining class: "ّ َ" -> "َ ّ" in Arabic)
-#define TT_CPS 8192
-static int nfkd(const TtsTok* t, const uint32_t* cps, int n, uint32_t* out) {
-    int o = 0;
-    for (int i = 0; i < n && o + 20 < TT_CPS; i++) {
-        uint32_t c = cps[i];
-        const uint8_t* d = c >= 0x80 ? nfkd_of(t, c) : NULL;
-        if (c >= 0xAC00 && c <= 0xD7A3) {
-            uint32_t s = c - 0xAC00;
-            out[o++] = 0x1100 + s / 588, out[o++] = 0x1161 + s % 588 / 28;
-            if (s % 28) out[o++] = 0x11A7 + s % 28;
-        } else if (d)
-            for (int k = 0; k < d[4]; k++) out[o++] = rd32(d + 5 + 4 * k);
-        else out[o++] = c;
-    }
-    for (int i = 1; i < o; i++) {
-        int k = ccc_of(t, out[i]);
-        if (!k) continue;
-        for (int q = i; q > 0; q--) {
-            int kp = ccc_of(t, out[q - 1]);
-            if (kp <= k) break;
-            uint32_t x = out[q];
-            out[q] = out[q - 1], out[q - 1] = x;
-        }
-    }
-    return o;
-}
-
 int ttstok_encode(const TtsTok* t, const char* text, const char* lang, uint16_t* out, int max) {
-    static char a[4096], b[16384], st[8192];
-    static uint32_t c1[TT_CPS], c2[TT_CPS];
+    static char a[4096], b[8192], st[8192];
     punc_norm(text, a, sizeof(a));
     // Russian: stress marks first (on the text as written, before NFKD splits й and ё), as the official tokenizer
     const char* src = a;
@@ -252,33 +201,18 @@ int ttstok_encode(const TtsTok* t, const char* text, const char* lang, uint16_t*
         rustress_text(t->ru, a, st, sizeof(st));
         src = st;
     }
-    // lower(), then NFKD
-    int n = 0;
-    for (const char* s = src; *s && n < TT_CPS;) c1[n++] = lower_cp(t, next_cp(&s));
-    if (t->ja && !strcmp(lang, "ja")) {
-        // Japanese: kanji as hiragana first, in the text as written (the official tokenizer decomposes it before
-        // pykakasi, and then a word with a voiced kana ending, 食べる, never matches: see ja_kana.h). The CJK
-        // compatibility ideographs become the unified ones they stand for, as NFKD would make them.
-        for (int i = 0; i < n; i++)
-            if (c1[i] >= 0xF900 && c1[i] <= 0xFAFF) {
-                const uint8_t* d = nfkd_of(t, c1[i]);
-                if (d && d[4] == 1) c1[i] = rd32(d + 5);
-            }
-        n = jakana_convert(t->ja, c1, n, c2, TT_CPS - 64);
-        memcpy(c1, c2, (size_t)n * sizeof(c1[0]));
-    } else if (!strcmp(lang, "ja")) {   // (without the dictionary: still no zero-width space, see st_speak)
-        int o = 0;
-        for (int i = 0; i < n; i++)
-            if (c1[i] != 0x200B) c1[o++] = c1[i];
-        n = o;
-    }
-    n = nfkd(t, c1, n, c2);
-    const uint32_t* cps = c2;
-    // "[lang]" in front and spaces as [SPACE]
+    // lower(), then NFKD, with "[lang]" in front and spaces as [SPACE]
     size_t o = (size_t)snprintf(b, sizeof(b), "[%s]", lang);
-    for (int i = 0; i < n && o + 8 < sizeof(b); i++) {
-        if (cps[i] == ' ') memcpy(b + o, "[SPACE]", 7), o += 7;
-        else o += put_cp(cps[i], b + o);
+    for (const char* s = src; *s && o + 40 < sizeof(b);) {
+        uint32_t c = lower_cp(t, next_cp(&s));
+        if (c == ' ') {
+            memcpy(b + o, "[SPACE]", 7), o += 7;
+            continue;
+        }
+        const uint8_t* d = c < 0x3000 ? nfkd_of(t, c) : NULL;
+        if (d)
+            for (int i = 0; i < d[4]; i++) o += put_cp(rd32(d + 5 + 4 * i), b + o);
+        else o += put_cp(c, b + o);
     }
     b[o] = 0;
     int k = 0;

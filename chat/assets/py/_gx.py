@@ -91,14 +91,7 @@ LANG = _garlic.lang() if hasattr(_garlic, "lang") else "es"
 _NAMES = {"es": {"space": "Espacio", "return": "Enter", "escape": "Esc", "arrows": "Mover"},
           "en": {"space": "Space", "return": "Enter", "escape": "Esc", "arrows": "Move"},
           "pt": {"space": "Espaço", "return": "Enter", "escape": "Esc", "arrows": "Mover"},
-          "ru": {"space": "Пробел", "return": "Enter", "escape": "Esc", "arrows": "Двигать"},
-          "fr": {"space": "Espace", "return": "Entrée", "escape": "Échap", "arrows": "Déplacer"},
-          "de": {"space": "Leertaste", "return": "Enter", "escape": "Esc", "arrows": "Bewegen"},
-          "ar": {"space": "مسافة", "return": "Enter", "escape": "Esc", "arrows": "تحريك"},
-          "ja": {"space": "スペース", "return": "Enter", "escape": "Esc", "arrows": "移動"},
-          "zh-Hans": {"space": "空格", "return": "回车", "escape": "Esc", "arrows": "移动"},
-          "zh-Hant": {"space": "空白鍵", "return": "Enter", "escape": "Esc", "arrows": "移動"},
-          "ko": {"space": "스페이스", "return": "Enter", "escape": "Esc", "arrows": "이동"}}
+          "ru": {"space": "Пробел", "return": "Enter", "escape": "Esc", "arrows": "Двигать"}}
 
 
 def key_label(k):

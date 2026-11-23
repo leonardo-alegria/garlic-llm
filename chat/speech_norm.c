@@ -9,13 +9,12 @@
 
 #include "speech_text.h"
 
-enum { ES, EN, PT, FR, DE, IT, RU, AR, JA, NL_ };
+enum { ES, EN, PT, FR, DE, IT, RU, NL_ };
 enum { G_ALONE, G_M, G_F };   // a number said alone ("uno"), before a masculine noun ("un"), before a feminine one
 
 typedef struct {
     char* p;
     int n, max;
-    int glue;   // the next word is written together with the last one (Arabic و)
 } Buf;
 
 static void put(Buf* b, const char* s) {
@@ -29,10 +28,6 @@ static void putn(Buf* b, const char* s, int n) {
 static int is_letter(uint32_t c);
 static uint32_t cp(const char* s, int* len);
 static void sp(Buf* b) {   // a space before a new word, unless at the start or after an opening mark (¿ ¡ ( « ")
-    if (b->glue) {
-        b->glue = 0;
-        return;
-    }
     if (!b->n || b->p[b->n - 1] == ' ') return;
     int k = b->n - 1;
     while (k > 0 && ((uint8_t)b->p[k] & 0xC0) == 0x80) k--;
@@ -68,8 +63,7 @@ static int is_upper(uint32_t c) {
 static int is_lower(uint32_t c) {
     return (c >= 'a' && c <= 'z') || (c >= 0xDF && c <= 0xFF && c != 0xF7) || (c >= 0x430 && c <= 0x44F) || c == 0x451;
 }
-static int is_arabic(uint32_t c) { return (c >= 0x620 && c <= 0x65F) || (c >= 0x670 && c <= 0x6D3); }
-static int is_letter(uint32_t c) { return is_upper(c) || is_lower(c) || (c >= 0x100 && c < 0x250) || is_arabic(c); }
+static int is_letter(uint32_t c) { return is_upper(c) || is_lower(c) || (c >= 0x100 && c < 0x250); }
 static int is_digit(char c) { return c >= '0' && c <= '9'; }
 static int alnum_at(const char* s, int i, int n) {
     if (i < 0 || i >= n) return 0;
@@ -498,214 +492,8 @@ static void ru_card_gen(Buf* b, uint64_t n, int g) {
     if (r) ru_lt1000_gen(b, (int)r, g);
 }
 
-// ---------------------------------------------------------------------------------------------------- Arabic
-// One fixed form for every number: the masculine counting form (ثلاثة، أربعة... with ة) and the -ين endings of
-// speech (اثنين، عشرين، ألفين), units before tens (خمسة وعشرين), parts joined with و. Written Arabic changes the
-// number with the gender and the case of its noun; this is the form heard most when a number is read on its own
-// and in everyday speech, and the one the noun after it does not need to be parsed for.
-static const char* ar_u[20] = {"صفر", "واحد", "اثنين", "ثلاثة", "أربعة", "خمسة", "ستة", "سبعة", "ثمانية", "تسعة",
-                               "عشرة", "أحد عشر", "اثني عشر", "ثلاثة عشر", "أربعة عشر", "خمسة عشر", "ستة عشر",
-                               "سبعة عشر", "ثمانية عشر", "تسعة عشر"};
-static const char* ar_t[10] = {"", "", "عشرين", "ثلاثين", "أربعين", "خمسين", "ستين", "سبعين", "ثمانين", "تسعين"};
-static const char* ar_h[10] = {"", "مئة", "مئتين", "ثلاثمئة", "أربعمئة", "خمسمئة", "ستمئة", "سبعمئة", "ثمانمئة", "تسعمئة"};
-static const char* ar_month[13] = {"", "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس", "سبتمبر",
-                                   "أكتوبر", "نوفمبر", "ديسمبر"};
-
-static void ar_and(Buf* b) {   // "و", written together with the next word
-    sp(b);
-    put(b, "و");
-    b->glue = 1;
-}
-static void ar_lt1000(Buf* b, int n) {   // n > 0
-    if (n >= 100) {
-        word(b, ar_h[n / 100]);
-        n %= 100;
-        if (!n) return;
-        ar_and(b);
-    }
-    if (n < 20) return word(b, ar_u[n]);
-    if (n % 10) word(b, ar_u[n % 10]), ar_and(b);
-    word(b, ar_t[n / 10]);
-}
-static void ar_card(Buf* b, uint64_t n) {
-    if (!n) return word(b, "صفر");
-    uint64_t g[4] = {n / 1000000000ull % 1000, n / 1000000 % 1000, n / 1000 % 1000, n % 1000};
-    static const char* nm[3][4] = {{"مليار", "مليارين", "مليارات", "مليار"},   // 1, 2, 3-10, else
-                                   {"مليون", "مليونين", "ملايين", "مليون"},
-                                   {"ألف", "ألفين", "آلاف", "ألف"}};
-    int any = 0;
-    for (int k = 0; k < 4; k++) {
-        if (!g[k]) continue;
-        if (any) ar_and(b);
-        any = 1;
-        if (k == 3) ar_lt1000(b, (int)g[k]);
-        else if (g[k] == 1) word(b, nm[k][0]);
-        else if (g[k] == 2) word(b, nm[k][1]);
-        else ar_lt1000(b, (int)g[k]), word(b, g[k] % 100 >= 3 && g[k] % 100 <= 10 ? nm[k][2] : nm[k][3]);
-    }
-}
-static void ar_ord(Buf* b, int n) {   // masculine, with its article: القرن الحادي والعشرين (1-99)
-    static const char* o[11] = {"", "الأول", "الثاني", "الثالث", "الرابع", "الخامس", "السادس", "السابع", "الثامن",
-                                "التاسع", "العاشر"};
-    if (n <= 10) return word(b, o[n]);
-    if (n < 20) return word(b, n == 11 ? "الحادي" : o[n - 10]), word(b, "عشر");
-    if (n % 10) word(b, n % 10 == 1 ? "الحادي" : o[n % 10]), ar_and(b);
-    word(b, "ال"), put(b, ar_t[n / 10]);
-}
-static void ar_digits(Buf* b, const char* s, int n) {
-    for (int i = 0; i < n; i++)
-        if (is_digit(s[i])) word(b, ar_u[s[i] - '0']);
-}
-static int ar_plural_n(uint64_t v) { return v % 100 >= 3 && v % 100 <= 10; }   // 3-10: the noun in the plural
-
-// ---------------------------------------------------------------------------------------------------- Japanese
-// In hiragana, so that the kanji dictionary does not choose the reading: 1985 -> せんきゅうひゃくはちじゅうご,
-// 1400万人 -> せんよんひゃくまんにん. Counters change the number's last sound (いっかい, さんぼん, はっぷん) and have
-// readings of their own (ついたち, ふつか, ひとり, みっつ, はたち): the common ones are here.
-static const char* ja_d[10] = {"ゼロ", "いち", "に", "さん", "よん", "ご", "ろく", "なな", "はち", "きゅう"};
-static void ja_lt10000(Buf* b, int n, int unit_after) {   // 1-9999; unit_after: 万, 億 or 兆 follows (1000万: いっせんまん)
-    int th = n / 1000, h = n / 100 % 10, t = n / 10 % 10, u = n % 10;
-    if (th == 1) put(b, unit_after && n == 1000 ? "いっせん" : "せん");
-    else if (th == 3) put(b, "さんぜん");
-    else if (th == 8) put(b, "はっせん");
-    else if (th) put(b, ja_d[th]), put(b, "せん");
-    if (h == 1) put(b, "ひゃく");
-    else if (h == 3) put(b, "さんびゃく");
-    else if (h == 6) put(b, "ろっぴゃく");
-    else if (h == 8) put(b, "はっぴゃく");
-    else if (h) put(b, ja_d[h]), put(b, "ひゃく");
-    if (t) {
-        if (t > 1) put(b, ja_d[t]);
-        put(b, "じゅう");
-    }
-    if (u) put(b, ja_d[u]);
-}
-static int ja_ends(const Buf* b, int from, const char* e) {
-    int l = (int)strlen(e);
-    return b->n - from >= l && !memcmp(b->p + b->n - l, e, l);
-}
-static void ja_swap_end(Buf* b, int l_old, const char* e) {   // the last l_old bytes become e
-    b->n -= l_old;
-    b->p[b->n] = 0;
-    put(b, e);
-}
-// sound changes of the number's end before a counter (rule bits) and of the counter's first kana
-enum {
-    J_ICHI = 1, J_ROKU = 2, J_HACHI = 4, J_JUU = 8, J_HYAKU = 16,   // いち ろく はち じゅう ひゃく -> いっ ろっ はっ じゅっ ひゃっ
-    J_P = 32,       // h-row counter after っ: ぽん ぴき ぱい ぷん
-    J_B3 = 64,      // h-row counter after さん, せん, まん: さんぼん, せんびき
-    J_PN = 128,     // h-row counter after any ん: さんぷん, よんぷん
-    J_G3 = 256,     // k-row counter after さん: さんがい
-    J_YO = 512,     // よん -> よ: よじ, よねん, よにん, よえん
-    J_SHICHI = 1024, J_KU = 2048, J_SHI = 4096,   // なな -> しち, きゅう -> く, よん -> し (しがつ)
-};
-#define J_K (J_ICHI | J_ROKU | J_HACHI | J_JUU | J_HYAKU)
-#define J_S (J_ICHI | J_HACHI | J_JUU)
-#define J_H (J_K | J_P)
-// the end of the number written from b->p[from]: changed for a counter with these rules; returns 1 if it ends in っ
-static int ja_rules(Buf* b, int from, int r) {
-    static const struct { int bit; const char *a, *z; } ch[] = {
-        {J_ICHI, "いち", "いっ"}, {J_ROKU, "ろく", "ろっ"}, {J_HACHI, "はち", "はっ"}, {J_JUU, "じゅう", "じゅっ"},
-        {J_HYAKU, "ひゃく", "ひゃっ"}, {J_YO, "よん", "よ"}, {J_SHI, "よん", "し"}, {J_SHICHI, "なな", "しち"},
-        {J_KU, "きゅう", "く"}};
-    for (int k = 0; k < (int)(sizeof(ch) / sizeof(ch[0])); k++)
-        if ((r & ch[k].bit) && ja_ends(b, from, ch[k].a)) {
-            ja_swap_end(b, (int)strlen(ch[k].a), ch[k].z);
-            return ch[k].z[strlen(ch[k].z) - 1] == (char)0xA3;   // (っ is E3 81 A3)
-        }
-    return 0;
-}
-static void ja_kana_shift(char* k, int d) {   // the first kana of k (3 bytes) + d codepoints: ほ -> ぼ (1), ぽ (2)
-    uint32_t c = (uint32_t)((k[0] & 15) << 12 | (k[1] & 63) << 6 | (k[2] & 63)) + (uint32_t)d;
-    k[0] = (char)(0xE0 | c >> 12), k[1] = (char)(0x80 | (c >> 6 & 63)), k[2] = (char)(0x80 | (c & 63));
-}
-typedef struct {
-    const char* w;      // as written after the digits
-    const char* yomi;   // its reading
-    int rules;
-} JaCounter;
-static const JaCounter ja_ctr[] = {   // longer first where one starts another (分の before 分, 日間 before 日)
-    {"時間", "じかん", J_YO | J_KU}, {"時", "じ", J_YO | J_SHICHI | J_KU}, {"分の", "ぶんの", 0},
-    {"分間", "ふんかん", J_H | J_PN}, {"分", "ふん", J_H | J_PN}, {"秒", "びょう", 0}, {"年間", "ねんかん", J_YO},
-    {"年", "ねん", J_YO}, {"か月", "かげつ", J_K}, {"ヶ月", "かげつ", J_K}, {"カ月", "かげつ", J_K},
-    {"ヵ月", "かげつ", J_K}, {"ケ月", "かげつ", J_K}, {"月", "がつ", J_SHI | J_SHICHI | J_KU},
-    {"週間", "しゅうかん", J_S}, {"日間", "にちかん", J_SHICHI | J_KU}, {"日", "にち", J_SHICHI | J_KU}, {"円", "えん", J_YO},
-    {"人", "にん", J_YO}, {"回", "かい", J_K}, {"個", "こ", J_K}, {"階", "かい", J_K | J_G3}, {"件", "けん", J_K},
-    {"軒", "けん", J_K | J_G3}, {"冊", "さつ", J_S}, {"歳", "さい", J_S}, {"才", "さい", J_S}, {"点", "てん", J_S},
-    {"本", "ほん", J_H | J_B3}, {"匹", "ひき", J_H | J_B3}, {"杯", "はい", J_H | J_B3}, {"泊", "はく", J_H},
-    {"台", "だい", 0}, {"枚", "まい", 0}, {"度", "ど", 0}, {"倍", "ばい", 0}, {"番", "ばん", 0}, {"位", "い", 0},
-    {"次", "じ", 0}, {"代", "だい", 0}, {"世紀", "せいき", J_S}, {"号", "ごう", 0}, {"章", "しょう", J_S},
-    {"巻", "かん", J_K}, {"話", "わ", 0}, {"部", "ぶ", 0}, {"名", "めい", 0}, {"割", "わり", 0}, {"社", "しゃ", J_S},
-    {"種類", "しゅるい", J_S}, {"つ", "つ", 0}, {0, 0, 0}};
-// the counter (if any) at s[i]: its index in ja_ctr and its length in bytes
-static int ja_counter_at(const char* s, int n, int i, int* len) {
-    for (int k = 0; ja_ctr[k].w; k++) {
-        int l = (int)strlen(ja_ctr[k].w);
-        if (n - i >= l && !memcmp(s + i, ja_ctr[k].w, l)) return *len = l, k;
-    }
-    return -1;
-}
-// the number v (already written from b->p[from]) followed by counter k
-static void ja_count(Buf* b, int from, uint64_t v, int k, int after_month) {
-    const JaCounter* c = &ja_ctr[k];
-    static const char* days[11] = {"", "ついたち", "ふつか", "みっか", "よっか", "いつか", "むいか", "なのか", "ようか",
-                                   "ここのか", "とおか"};
-    static const char* tsu[11] = {"", "ひとつ", "ふたつ", "みっつ", "よっつ", "いつつ", "むっつ", "ななつ", "やっつ",
-                                  "ここのつ", "とお"};
-    const char* whole = NULL;   // a reading of its own for the number and the counter
-    int is_day = !strcmp(c->w, "日"), is_days = !strcmp(c->w, "日間");
-    if ((is_day || is_days) && v <= 10 && v && !(v == 1 && (!after_month || is_days))) whole = days[v];
-    if ((is_day || is_days) && (v == 14 || v == 24)) whole = v == 14 ? "じゅうよっか" : "にじゅうよっか";
-    if ((is_day || is_days) && v == 20) whole = "はつか";
-    if (is_days && !whole) {   // いちにちかん, じゅうごにちかん
-        ja_rules(b, from, J_SHICHI | J_KU);
-        return put(b, "にちかん");
-    }
-    if (is_days) {
-        b->n = from, b->p[from] = 0;
-        return put(b, whole), put(b, "かん");
-    }
-    if (!strcmp(c->w, "人") && (v == 1 || v == 2)) whole = v == 1 ? "ひとり" : "ふたり";
-    if (!strcmp(c->w, "つ")) {
-        if (v >= 1 && v <= 10) whole = tsu[v];
-        else return put(b, "つ");
-    }
-    if ((!strcmp(c->w, "歳") || !strcmp(c->w, "才")) && v == 20) whole = "はたち";
-    if (!strcmp(c->w, "月") && !(v >= 1 && v <= 12)) return put(b, "がつ");
-    if (!strcmp(c->w, "度") && !v) whole = "れいど";   // 0度
-    if (whole) {
-        b->n = from, b->p[from] = 0;
-        return put(b, whole);
-    }
-    int soku = ja_rules(b, from, c->rules);
-    char y[32];
-    snprintf(y, sizeof(y), "%s", c->yomi);
-    if (soku && (c->rules & J_P)) ja_kana_shift(y, 2);   // いっぽん, はっぷん
-    else if ((c->rules & J_B3) && (ja_ends(b, from, "さん") || ja_ends(b, from, "せん") || ja_ends(b, from, "まん")))
-        ja_kana_shift(y, 1);   // さんぼん
-    else if ((c->rules & J_PN) && ja_ends(b, from, "ん")) ja_kana_shift(y, 2);   // さんぷん, よんぷん
-    else if ((c->rules & J_G3) && ja_ends(b, from, "さん")) ja_kana_shift(y, 1);   // さんがい
-    put(b, y);
-}
-static void ja_card(Buf* b, uint64_t n) {
-    if (!n) return put(b, "ゼロ");
-    uint64_t g[4] = {n / 1000000000000ull % 10000, n / 100000000 % 10000, n / 10000 % 10000, n % 10000};
-    static const char* unit[3] = {"ちょう", "おく", "まん"};
-    for (int k = 0; k < 4; k++) {
-        if (!g[k]) continue;
-        int from = b->n;
-        ja_lt10000(b, (int)g[k], k < 3);
-        if (k == 0) ja_rules(b, from, J_S);   // いっちょう, はっちょう, じゅっちょう
-        if (k < 3) put(b, unit[k]);
-    }
-}
-static void ja_digits(Buf* b, const char* s, int n) {
-    for (int i = 0; i < n; i++)
-        if (is_digit(s[i])) put(b, ja_d[s[i] - '0']);
-}
-
 static int lang_of(const char* lang) {
-    static const char* names[NL_] = {"es", "en", "pt", "fr", "de", "it", "ru", "ar", "ja"};
+    static const char* names[NL_] = {"es", "en", "pt", "fr", "de", "it", "ru"};
     for (int i = 0; i < NL_; i++)
         if (!strncmp(lang, names[i], 2)) return i;
     return -1;
@@ -719,8 +507,6 @@ static void card(Buf* b, int L, uint64_t n, int g) {
     case DE: return de_card(b, n, g);
     case FR: return fr_card(b, n, g);
     case RU: return ru_card(b, n, g);
-    case AR: return ar_card(b, n);
-    case JA: return ja_card(b, n);
     default: return en_card(b, n);
     }
 }
@@ -884,13 +670,7 @@ static const char* letter_name(int L, uint32_t c) {
     static const char* cyr[32] = {"а", "бэ", "вэ", "гэ", "дэ", "е", "жэ", "зэ", "и", "и краткое", "ка", "эль", "эм",
                                   "эн", "о", "пэ", "эр", "эс", "тэ", "у", "эф", "ха", "цэ", "че", "ша", "ща",
                                   "твёрдый знак", "ы", "мягкий знак", "э", "ю", "я"};
-    static const char* ar[26] = {"إيه", "بي", "سي", "دي", "إي", "إف", "جي", "إتش", "آي", "جيه", "كيه", "إل", "إم", "إن",
-                                 "أو", "بي", "كيو", "آر", "إس", "تي", "يو", "في", "دبليو", "إكس", "واي", "زد"};
-    static const char* ja[26] = {"エー", "ビー", "シー", "ディー", "イー", "エフ", "ジー", "エイチ", "アイ", "ジェー", "ケー",
-                                 "エル", "エム", "エヌ", "オー", "ピー", "キュー", "アール", "エス", "ティー", "ユー", "ブイ",
-                                 "ダブリュー", "エックス", "ワイ", "ゼット"};
-    const char** t = L == ES ? es : L == PT ? pt : L == IT ? it : L == FR ? fr : L == DE ? de : L == RU ? ru :
-                     L == AR ? ar : L == JA ? ja : en;
+    const char** t = L == ES ? es : L == PT ? pt : L == IT ? it : L == FR ? fr : L == DE ? de : L == RU ? ru : en;
     if (c >= 'a' && c <= 'z') c -= 32;
     if (c >= 'A' && c <= 'Z') return t[c - 'A'];
     if (c == 0xD1 || c == 0xF1) return L == ES ? "eñe" : "ene";
@@ -963,7 +743,7 @@ static int acronym(Buf* b, int L, const uint32_t* c, int n) {
         {"OU", "ET", "LE", "LA", "DU", "IL", "JE", "TU", "UN", "EN", "NE", "SE", "CE", "MA", "TA", "SA", "MON", "TON", "SON", "OK", "AH", "OH", "DE", 0},
         {"ER", "ES", "DA", "JA", "SO", "ZU", "IM", "AM", "UM", "OB", "DU", "WO", "OK", "AN", "IN", "AB", "NU", 0},
         {"DI", "IL", "IO", "MA", "TU", "LA", "LO", "NO", "SI", "SE", "CI", "MI", "TI", "VI", "UN", "IN", "HO", "HA", "OK", "DA", "FA", 0},
-        {0}, {"OK", 0}, {"OK", 0}};
+        {0}};
     if (k < 60 && in_list(up, as_word)) return 0;
     if (L >= 0 && n <= 3 && in_list(up, two[L])) return 0;   // (before the spelled list: EU in Portuguese is "I")
     int spell = k < 60 && in_list(up, spelled);
@@ -973,8 +753,8 @@ static int acronym(Buf* b, int L, const uint32_t* c, int n) {
     for (int i = 0; i < n; i++) {
         const char* nm = letter_name(L, c[i]);
         if (!nm) return 0;
-        // Spanish: with hyphens (ele-ele-eme), which T3 says more clearly than with spaces; Japanese: together
-        if (i && L != JA) put(b, L == ES ? "-" : " ");
+        // Spanish: with hyphens (ele-ele-eme), which T3 says more clearly than with spaces
+        if (i) put(b, L == ES ? "-" : " ");
         put(b, nm);
     }
     return 1;
@@ -991,283 +771,23 @@ typedef struct {
     int century;        // a century word was just read (siglo, século, secolo): Roman numerals follow
     int num_end;        // where the last number ended in s (units after it: 5 kg), and its value
     uint64_t num_v;
-    int ja_month;       // Japanese: where the last 月 after a number ended (11月1日 -> ついたち)
 } St;
 
 static const char* dec_word(int L, char sepc) {
     if (sepc == ',') {
-        static const char* w[NL_] = {"coma", "point", "vírgula", "virgule", "Komma", "virgola", "запятая", "فاصلة", "てん"};
+        static const char* w[NL_] = {"coma", "point", "vírgula", "virgule", "Komma", "virgola", "запятая"};
         return w[L];
     }
-    static const char* w[NL_] = {"punto", "point", "ponto", "point", "Punkt", "punto", "точка", "فاصلة", "てん"};
+    static const char* w[NL_] = {"punto", "point", "ponto", "point", "Punkt", "punto", "точка"};
     return w[L];
 }
 static const char* pct_word(int L) {
-    static const char* w[NL_] = {"por ciento", "percent", "por cento", "pour cent", "Prozent", "per cento", "", "بالمئة",
-                                 "パーセント"};
+    static const char* w[NL_] = {"por ciento", "percent", "por cento", "pour cent", "Prozent", "per cento", ""};
     return w[L];
-}
-
-// ---------------------------------------------------------------------------------------------------- Arabic and Japanese numbers
-// digits at s[i] with thousands groups: "1,500,000" (a comma before each group of exactly 3 digits), or with
-// periods if there are two groups or more ("1.000.000"; "1.500" is a decimal); -> the end
-static int arja_int(const char* s, int n, int i, uint64_t* v, int* nd, int* grouped) {
-    int a = i;
-    while (i < n && is_digit(s[i])) i++;
-    *nd = i - a, *grouped = 0;
-    uint64_t x = 0;
-    for (int k = a; k < i && k < a + 18; k++) x = x * 10 + (uint64_t)(s[k] - '0');
-    char sep = 0;
-    if (*nd <= 3)
-        while (i + 3 < n && (s[i] == ',' || s[i] == '.') && (!sep || s[i] == sep) && is_digit(s[i + 1]) &&
-               is_digit(s[i + 2]) && is_digit(s[i + 3]) && !(i + 4 < n && is_digit(s[i + 4]))) {
-            if (s[i] == '.' && !sep && !(i + 8 < n && s[i + 4] == '.' && is_digit(s[i + 5]))) break;
-            sep = s[i];
-            x = x * 1000 + (uint64_t)((s[i + 1] - '0') * 100 + (s[i + 2] - '0') * 10 + (s[i + 3] - '0'));
-            i += 4, *grouped = 1;
-        }
-    *v = x;
-    return i;
-}
-// a date written with numbers at s[a]: d/m/yyyy, d-m-yyyy or yyyy-m-d (yyyy/m/d); -> its end, or 0
-static int arja_date(const char* s, int n, int a, int* y, int* m, int* d) {
-    int f[3], len[3], k = a;
-    char sep = 0;
-    for (int g = 0; g < 3; g++) {
-        int st = k;
-        while (k < n && is_digit(s[k]) && k - st < 5) k++;
-        len[g] = k - st;
-        if (!len[g]) return 0;
-        f[g] = 0;
-        for (int q = st; q < k; q++) f[g] = f[g] * 10 + (s[q] - '0');
-        if (g < 2) {
-            if (k >= n || (s[k] != '/' && s[k] != '-' && s[k] != '.') || (sep && s[k] != sep)) return 0;
-            sep = s[k++];
-        }
-    }
-    if (k < n && (is_digit(s[k]) || ((s[k] == '-' || s[k] == '/') && k + 1 < n && is_digit(s[k + 1])))) return 0;
-    if (len[0] == 4 && len[1] <= 2 && len[2] <= 2) *y = f[0], *m = f[1], *d = f[2];
-    else if (len[2] == 4 && len[0] <= 2 && len[1] <= 2) *d = f[0], *m = f[1], *y = f[2];
-    else return 0;
-    return *m >= 1 && *m <= 12 && *d >= 1 && *d <= 31 && *y >= 1000 ? k : 0;
-}
-
-static int ar_number(St* st, int i) {
-    const char* s = st->s;
-    int n = st->n;
-    Buf* b = st->b;
-    int a = i, nd, grouped, y, mo, d;
-    uint64_t v;
-    int e = arja_int(s, n, i, &v, &nd, &grouped);
-    int de = grouped ? 0 : arja_date(s, n, a, &y, &mo, &d);
-    if (de) {   // 21/11/2026 -> واحد وعشرين نوفمبر ألفين وستة وعشرين
-        ar_card(b, (uint64_t)d), word(b, ar_month[mo]), ar_card(b, (uint64_t)y);
-        return de;
-    }
-    {   // a phone number or a code: 0101-234-5678 (three groups or more): digit by digit
-        int k = e, groups = 1;
-        while (k + 1 < n && s[k] == '-' && is_digit(s[k + 1])) {
-            k++;
-            while (k < n && is_digit(s[k])) k++;
-            groups++;
-        }
-        if (!grouped && groups >= 3) return ar_digits(b, s + a, k - a), k;
-    }
-    int has_dec = e + 1 < n && (s[e] == '.' || s[e] == ',') && is_digit(s[e + 1]);
-    if (nd > 12 || (nd > 1 && s[a] == '0' && !has_dec)) return ar_digits(b, s + a, e - a), e;   // 0800, long numbers
-    // time: 10:30 -> العاشرة والنصف
-    if (!grouped && v <= 24 && nd <= 2 && e + 2 < n && s[e] == ':' && is_digit(s[e + 1]) && is_digit(s[e + 2]) &&
-        !(e + 3 < n && is_digit(s[e + 3])) && (s[e + 1] - '0') * 10 + (s[e + 2] - '0') < 60) {
-        static const char* hour[13] = {"", "الواحدة", "الثانية", "الثالثة", "الرابعة", "الخامسة", "السادسة", "السابعة",
-                                       "الثامنة", "التاسعة", "العاشرة", "الحادية عشرة", "الثانية عشرة"};
-        int mm = (s[e + 1] - '0') * 10 + (s[e + 2] - '0'), h = (int)(v % 12);
-        if (!h) h = 12;
-        if (mm == 45) word(b, hour[h % 12 + 1]), word(b, "إلا ربعًا");
-        else {
-            word(b, hour[h]);
-            if (mm == 30) ar_and(b), word(b, "النصف");
-            else if (mm == 15) ar_and(b), word(b, "الربع");
-            else if (mm == 20) ar_and(b), word(b, "الثلث");
-            else if (mm) ar_and(b), ar_card(b, (uint64_t)mm), word(b, ar_plural_n((uint64_t)mm) ? "دقائق" : "دقيقة");
-        }
-        return e + 3;
-    }
-    // the century: القرن 21 -> القرن الحادي والعشرين
-    if (!has_dec && !grouped && v >= 1 && v < 100 && !strcmp(st->prev, "القرن")) return ar_ord(b, (int)v), e;
-    ar_card(b, v);
-    int q = e;
-    {   // a price with cents: $2.50 -> اثنين دولار وخمسين سنت
-        const char* cur = st->prev[0] == '$' || !strcmp(st->prev, "€") || !strcmp(st->prev, "£") ? st->prev : NULL;
-        if (cur && has_dec && e + 3 <= n && is_digit(s[e + 1]) && is_digit(s[e + 2]) && !(e + 3 < n && is_digit(s[e + 3]))) {
-            word(b, cur[0] == '$' ? "دولار" : !strcmp(cur, "€") ? "يورو" : "جنيه");
-            int c = (s[e + 1] - '0') * 10 + (s[e + 2] - '0');
-            if (c) ar_and(b), ar_card(b, (uint64_t)c), word(b, cur[0] == '$' || !strcmp(cur, "€") ? "سنت" : "بنس");
-            return e + 3;
-        }
-    }
-    if (has_dec) {   // 3.5 -> ثلاثة فاصلة خمسة; 3.14 -> فاصلة أربعة عشر; 0.05 -> فاصلة صفر خمسة
-        int f = e + 1, g = f;
-        while (g < n && is_digit(s[g])) g++;
-        word(b, "فاصلة");
-        if (g - f <= 2 && s[f] != '0') {
-            uint64_t x = 0;
-            for (int k = f; k < g; k++) x = x * 10 + (uint64_t)(s[k] - '0');
-            ar_card(b, x);
-        } else ar_digits(b, s + f, g - f);
-        q = g;
-    }
-    int k = q;
-    while (k < n && s[k] == ' ') k++;
-    if (k < n && s[k] == '%') return word(b, "بالمئة"), k + 1;
-    {   // degrees: 25°C, 25 °C, 25℃
-        int deg = 0, c = 0;
-        if (k + 1 < n && (uint8_t)s[k] == 0xC2 && (uint8_t)s[k + 1] == 0xB0) {
-            deg = k + 2;
-            if (deg < n && (s[deg] == 'C' || s[deg] == 'F') && !alnum_at(s, deg + 1, n)) c = s[deg++];
-        } else if (k + 2 < n && (uint8_t)s[k] == 0xE2 && (uint8_t)s[k + 1] == 0x84 && (uint8_t)s[k + 2] == 0x83)
-            deg = k + 3, c = 'C';
-        if (deg) {
-            word(b, ar_plural_n(v) && !has_dec ? "درجات" : "درجة");
-            if (c) word(b, c == 'C' ? "مئوية" : "فهرنهايت");
-            return deg;
-        }
-    }
-    {   // currency after the number (15$, 30 €) or before it (st->prev: $15)
-        const char* cur = st->prev[0] == '$' || !strcmp(st->prev, "€") || !strcmp(st->prev, "£") ? st->prev : NULL;
-        int ce = q;
-        if (!cur && k < n && s[k] == '$') cur = "$", ce = k + 1;
-        else if (!cur && k + 2 < n && !memcmp(s + k, "€", 3)) cur = "€", ce = k + 3;
-        else if (!cur && k + 1 < n && !memcmp(s + k, "£", 2)) cur = "£", ce = k + 2;
-        if (cur) {
-            int pl = ar_plural_n(v) && !has_dec;
-            word(b, cur[0] == '$' ? (pl ? "دولارات" : "دولار") : !strcmp(cur, "€") ? "يورو" : (pl ? "جنيهات" : "جنيه"));
-            return ce;
-        }
-    }
-    if (q + 1 < n && s[q] == '-' && is_digit(s[q + 1])) return word(b, "إلى"), q + 1;   // a range: 5-7
-    return q;
-}
-
-static int ja_ctr_index(const char* w) {
-    for (int k = 0; ja_ctr[k].w; k++)
-        if (!strcmp(ja_ctr[k].w, w)) return k;
-    return 0;
-}
-static int ja_range(St* st, int q) {   // 5-7, 5〜7, 10:00〜12:00 -> から
-    const char* s = st->s;
-    int n = st->n;
-    if (q + 1 < n && s[q] == '-' && is_digit(s[q + 1])) return put(st->b, "から"), q + 1;
-    if (q + 3 < n && !memcmp(s + q, "〜", 3) && is_digit(s[q + 3])) return put(st->b, "から"), q + 3;
-    return q;
-}
-
-static int ja_number(St* st, int i) {
-    const char* s = st->s;
-    int n = st->n;
-    Buf* b = st->b;
-    int a = i, nd, grouped, y, mo, d;
-    uint64_t v;
-    int e = arja_int(s, n, i, &v, &nd, &grouped);
-    int de = grouped ? 0 : arja_date(s, n, a, &y, &mo, &d);
-    if (de) {   // 2026/11/21 -> にせんにじゅうろくねんじゅういちがつにじゅういちにち
-        int f = b->n;
-        ja_card(b, (uint64_t)y), ja_count(b, f, (uint64_t)y, ja_ctr_index("年"), 0);
-        f = b->n, ja_card(b, (uint64_t)mo), ja_count(b, f, (uint64_t)mo, ja_ctr_index("月"), 0);
-        f = b->n, ja_card(b, (uint64_t)d), ja_count(b, f, (uint64_t)d, ja_ctr_index("日"), 1);
-        return de;
-    }
-    {   // a phone number or a code: 03-1234-5678 (three groups or more): digit by digit, の between the groups
-        int k = e, groups = 1;
-        while (k + 1 < n && s[k] == '-' && is_digit(s[k + 1])) {
-            k++;
-            while (k < n && is_digit(s[k])) k++;
-            groups++;
-        }
-        if (!grouped && groups >= 3) {
-            for (int q = a; q < k; q++) put(b, s[q] == '-' ? "の" : ja_d[s[q] - '0']);
-            return k;
-        }
-    }
-    int has_dec = e + 1 < n && s[e] == '.' && is_digit(s[e + 1]);
-    if (nd > 15 || (nd > 1 && s[a] == '0' && !has_dec)) return ja_digits(b, s + a, e - a), e;   // 0800, long numbers
-    // time: 10:30 -> じゅうじさんじゅっぷん
-    if (!grouped && v <= 24 && nd <= 2 && e + 2 < n && s[e] == ':' && is_digit(s[e + 1]) && is_digit(s[e + 2]) &&
-        !(e + 3 < n && is_digit(s[e + 3])) && (s[e + 1] - '0') * 10 + (s[e + 2] - '0') < 60) {
-        int mm = (s[e + 1] - '0') * 10 + (s[e + 2] - '0'), f = b->n;
-        ja_card(b, v), ja_count(b, f, v, ja_ctr_index("時"), 0);
-        if (mm) f = b->n, ja_card(b, (uint64_t)mm), ja_count(b, f, (uint64_t)mm, ja_ctr_index("分"), 0);
-        return ja_range(st, e + 3);
-    }
-    // one digit right after capital letters or a katakana word, in English as Japanese says it: PS4 -> ピーエスフォー,
-    // MP3 -> エムピースリー, バイオハザード2 -> バイオハザードツー (not before a counter: ゲーム2本)
-    int cl0, after_kata = a >= 3 && (uint8_t)s[a - 3] == 0xE3 && ((uint8_t)s[a - 2] == 0x83 ||
-                                                               ((uint8_t)s[a - 2] == 0x82 && (uint8_t)s[a - 1] >= 0xA1));
-    if (nd == 1 && a > 0 && ((s[a - 1] >= 'A' && s[a - 1] <= 'Z') || after_kata) && !has_dec &&
-        ja_counter_at(s, n, e, &cl0) < 0 && !(e < n && (s[e] == '%' || s[e] == ':' || s[e] == '-'))) {
-        static const char* en[10] = {"ゼロ", "ワン", "ツー", "スリー", "フォー", "ファイブ", "シックス", "セブン", "エイト", "ナイン"};
-        return put(b, en[v]), e;
-    }
-    int from = b->n, q = e;
-    uint64_t total = v;
-    if (has_dec) {   // 3.14 -> さんてんいちよん; 1.5 -> いってんご; 0.5 -> れいてんご
-        if (v) ja_card(b, v), ja_rules(b, from, J_S);
-        else put(b, "れい");
-        put(b, "てん");
-        int f = e + 1, g = f;
-        while (g < n && is_digit(s[g])) g++;
-        ja_digits(b, s + f, g - f);
-        q = g;
-        static const char* mu[3][2] = {{"兆", "ちょう"}, {"億", "おく"}, {"万", "まん"}};   // 1.5万
-        for (int k = 0; k < 3; k++)
-            if (q + 3 <= n && !memcmp(s + q, mu[k][0], 3)) put(b, mu[k][1]), q += 3;
-    } else {   // 万, 億, 兆 after the digits: 1400万 -> せんよんひゃくまん, 2億5000万 -> におくごせんまん
-        uint64_t cur = v;
-        total = 0;
-        for (;;) {
-            uint64_t m = 0;
-            if (q + 3 <= n && !memcmp(s + q, "兆", 3)) m = 1000000000000ull;
-            else if (q + 3 <= n && !memcmp(s + q, "億", 3)) m = 100000000ull;
-            else if (q + 3 <= n && !memcmp(s + q, "万", 3)) m = 10000ull;
-            if (!m || cur >= 10000) break;
-            total += cur * m, q += 3, cur = 0;
-            if (q < n && is_digit(s[q])) {
-                int nd2, g2;
-                q = arja_int(s, n, q, &cur, &nd2, &g2);
-                continue;
-            }
-            break;
-        }
-        total += cur;
-        ja_card(b, total);
-    }
-    if (q < n && s[q] == '%') {   // じゅっパーセント
-        if (!has_dec) ja_rules(b, from, J_JUU);
-        put(b, "パーセント");
-        return ja_range(st, q + 1);
-    }
-    if (q + 1 < n && (uint8_t)s[q] == 0xC2 && (uint8_t)s[q + 1] == 0xB0) {   // 25°C, 25°
-        q += 2;
-        if (q < n && (s[q] == 'C' || s[q] == 'F') && !alnum_at(s, q + 1, n)) q++;
-        return put(b, "ど"), ja_range(st, q);
-    }
-    if (q + 2 < n && (uint8_t)s[q] == 0xE2 && (uint8_t)s[q + 1] == 0x84 && (uint8_t)s[q + 2] == 0x83)   // ℃
-        return put(b, "ど"), ja_range(st, q + 3);
-    if (st->prev[0] == '$' || !strcmp(st->prev, "€") || !strcmp(st->prev, "£"))   // $25 -> にじゅうごドル
-        return put(b, st->prev[0] == '$' ? "ドル" : !strcmp(st->prev, "€") ? "ユーロ" : "ポンド"), ja_range(st, q);
-    int cl, k = ja_counter_at(s, n, q, &cl);
-    if (k >= 0) {
-        if (has_dec) put(b, ja_ctr[k].yomi);   // 2.5倍 -> にてんごばい
-        else ja_count(b, from, total, k, st->ja_month == a && a > 0);
-        q += cl;
-        if (!strcmp(ja_ctr[k].w, "月")) st->ja_month = q;
-    }
-    return ja_range(st, q);
 }
 
 // a number written as digits, at s[i] (a digit); returns the index after what it consumed
 static int number(St* st, int i) {
-    if (st->L == AR) return ar_number(st, i);
-    if (st->L == JA) return ja_number(st, i);
     const char* s = st->s;
     int n = st->n, L = st->L;
     Buf* b = st->b;
@@ -1522,7 +1042,7 @@ say_decimal:;
         int we = lower_word(s, n, nws, tmp, sizeof(tmp));
         sp(b);
         putn(b, s + nws, we - nws);
-        static const char* conj[NL_] = {"con", "", "e", "", "", "e", "", "", ""};
+        static const char* conj[NL_] = {"con", "", "e", "", "", "e", ""};
         if (*conj[L2]) word(b, conj[L2]);
         card(b, L2, (uint64_t)((s[frac_a] - '0') * 10 + (s[frac_a + 1] - '0')), G_ALONE);
         return we;
@@ -1554,19 +1074,16 @@ say_decimal:;
     }
     if (cur) {
         static const char* eur[NL_][2] = {{"euro", "euros"}, {"euro", "euros"}, {"euro", "euros"}, {"euro", "euros"},
-                                          {"Euro", "Euro"}, {"euro", "euro"}, {"евро", "евро"}, {"يورو", "يورو"},
-                                          {"ユーロ", "ユーロ"}};
+                                          {"Euro", "Euro"}, {"euro", "euro"}, {"евро", "евро"}};
         static const char* usd[NL_][2] = {{"dólar", "dólares"}, {"dollar", "dollars"}, {"dólar", "dólares"},
-                                          {"dollar", "dollars"}, {"Dollar", "Dollar"}, {"dollaro", "dollari"}, {"доллар", "долларов"},
-                                          {"دولار", "دولار"}, {"ドル", "ドル"}};
+                                          {"dollar", "dollars"}, {"Dollar", "Dollar"}, {"dollaro", "dollari"}, {"доллар", "долларов"}};
         static const char* gbp[NL_][2] = {{"libra", "libras"}, {"pound", "pounds"}, {"libra", "libras"},
-                                          {"livre", "livres"}, {"Pfund", "Pfund"}, {"sterlina", "sterline"}, {"фунт", "фунтов"},
-                                          {"جنيه", "جنيه"}, {"ポンド", "ポンド"}};
+                                          {"livre", "livres"}, {"Pfund", "Pfund"}, {"sterlina", "sterline"}, {"фунт", "фунтов"}};
         const char* (*t)[2] = cur[0] == '$' ? usd : !strcmp(cur, "£") ? gbp : eur;
         if (L == RU && t != eur) word(b, ru_plural(v, t[L][0], cur[0] == '$' ? "доллара" : "фунта", t[L][1]));
         else word(b, v == 1 && !dsep ? t[L2][0] : t[L2][1]);
         if (cents) {
-            static const char* conj[NL_] = {"con", "", "e", "", "", "e", "", "", ""};
+            static const char* conj[NL_] = {"con", "", "e", "", "", "e", ""};
             if (*conj[L2]) word(b, conj[L2]);
             uint64_t f = (uint64_t)((s[frac_a] - '0') * 10 + (s[frac_a + 1] - '0'));
             card(b, L2, f, G_ALONE);
@@ -1579,8 +1096,7 @@ say_decimal:;
         if (d < n && s[d] == ' ') d++;
         if (d + 1 < n && (uint8_t)s[d] == 0xC2 && (uint8_t)s[d + 1] == 0xB0) {
             static const char* deg[NL_][2] = {{"grado", "grados"}, {"degree", "degrees"}, {"grau", "graus"},
-                                              {"degré", "degrés"}, {"Grad", "Grad"}, {"grado", "gradi"}, {"градус", "градусов"},
-                                              {"درجة", "درجة"}, {"ど", "ど"}};
+                                              {"degré", "degrés"}, {"Grad", "Grad"}, {"grado", "gradi"}, {"градус", "градусов"}};
             if (L == RU) word(b, ru_plural(v, "градус", "градуса", "градусов"));
             else word(b, v == 1 && !dsep ? deg[L2][0] : deg[L2][1]);
             d += 2;
@@ -1596,7 +1112,7 @@ say_decimal:;
         int j = i + 1;
         while (j < n && is_digit(s[j])) j++;
         if (!(j < n && s[j] == '-' && j + 1 < n && is_digit(s[j + 1])) && !(j < n && is_letter((uint8_t)s[j]))) {
-            static const char* to[NL_] = {"a", "to", "a", "à", "bis", "a", "", "إلى", "から"};
+            static const char* to[NL_] = {"a", "to", "a", "à", "bis", "a", ""};
             if (*to[L2]) word(b, to[L2]);
             return i + 1;   // the second number is read next, as a number of its own
         }
@@ -1608,47 +1124,32 @@ say_decimal:;
 static int unit(St* st, int i, int j) {
     static const char* const u[] = {"kg", "g", "km", "m", "cm", "mm", "ml", "h", "min", 0};
     static const char* w[9][NL_][2] = {
-        {{"kilo", "kilos"}, {"kilo", "kilos"}, {"quilo", "quilos"}, {"kilo", "kilos"}, {"Kilo", "Kilo"}, {"chilo", "chili"}, {0, 0},
-         {"كيلوغرام", "كيلوغرام"}, {"キログラム", "キログラム"}},
-        {{"gramo", "gramos"}, {"gram", "grams"}, {"grama", "gramas"}, {"gramme", "grammes"}, {"Gramm", "Gramm"}, {"grammo", "grammi"}, {0, 0},
-         {"غرام", "غرام"}, {"グラム", "グラム"}},
+        {{"kilo", "kilos"}, {"kilo", "kilos"}, {"quilo", "quilos"}, {"kilo", "kilos"}, {"Kilo", "Kilo"}, {"chilo", "chili"}, {0, 0}},
+        {{"gramo", "gramos"}, {"gram", "grams"}, {"grama", "gramas"}, {"gramme", "grammes"}, {"Gramm", "Gramm"}, {"grammo", "grammi"}, {0, 0}},
         {{"kilómetro", "kilómetros"}, {"kilometer", "kilometers"}, {"quilômetro", "quilômetros"}, {"kilomètre", "kilomètres"},
-         {"Kilometer", "Kilometer"}, {"chilometro", "chilometri"}, {0, 0}, {"كيلومتر", "كيلومتر"}, {"キロメートル", "キロメートル"}},
-        {{"metro", "metros"}, {"meter", "meters"}, {"metro", "metros"}, {"mètre", "mètres"}, {"Meter", "Meter"}, {"metro", "metri"}, {0, 0},
-         {"متر", "متر"}, {"メートル", "メートル"}},
+         {"Kilometer", "Kilometer"}, {"chilometro", "chilometri"}, {0, 0}},
+        {{"metro", "metros"}, {"meter", "meters"}, {"metro", "metros"}, {"mètre", "mètres"}, {"Meter", "Meter"}, {"metro", "metri"}, {0, 0}},
         {{"centímetro", "centímetros"}, {"centimeter", "centimeters"}, {"centímetro", "centímetros"}, {"centimètre", "centimètres"},
-         {"Zentimeter", "Zentimeter"}, {"centimetro", "centimetri"}, {0, 0}, {"سنتيمتر", "سنتيمتر"}, {"センチメートル", "センチメートル"}},
+         {"Zentimeter", "Zentimeter"}, {"centimetro", "centimetri"}, {0, 0}},
         {{"milímetro", "milímetros"}, {"millimeter", "millimeters"}, {"milímetro", "milímetros"}, {"millimètre", "millimètres"},
-         {"Millimeter", "Millimeter"}, {"millimetro", "millimetri"}, {0, 0}, {"مليمتر", "مليمتر"}, {"ミリメートル", "ミリメートル"}},
+         {"Millimeter", "Millimeter"}, {"millimetro", "millimetri"}, {0, 0}},
         {{"mililitro", "mililitros"}, {"milliliter", "milliliters"}, {"mililitro", "mililitros"}, {"millilitre", "millilitres"},
-         {"Milliliter", "Milliliter"}, {"millilitro", "millilitri"}, {0, 0}, {"مليلتر", "مليلتر"}, {"ミリリットル", "ミリリットル"}},
-        {{"hora", "horas"}, {"hour", "hours"}, {"hora", "horas"}, {"heure", "heures"}, {"Stunde", "Stunden"}, {"ora", "ore"}, {0, 0},
-         {"ساعة", "ساعات"}, {"じかん", "じかん"}},
+         {"Milliliter", "Milliliter"}, {"millilitro", "millilitri"}, {0, 0}},
+        {{"hora", "horas"}, {"hour", "hours"}, {"hora", "horas"}, {"heure", "heures"}, {"Stunde", "Stunden"}, {"ora", "ore"}, {0, 0}},
         {{"minuto", "minutos"}, {"minute", "minutes"}, {"minuto", "minutos"}, {"minute", "minutes"}, {"Minute", "Minuten"},
-         {"minuto", "minuti"}, {0, 0}, {"دقيقة", "دقائق"}, {"ふん", "ふん"}}};
+         {"minuto", "minuti"}, {0, 0}}};
     static const char* ru[9][3] = {{"килограмм", "килограмма", "килограммов"}, {"грамм", "грамма", "граммов"},
                                    {"километр", "километра", "километров"}, {"метр", "метра", "метров"},
                                    {"сантиметр", "сантиметра", "сантиметров"}, {"миллиметр", "миллиметра", "миллиметров"},
                                    {"миллилитр", "миллилитра", "миллилитров"}, {"час", "часа", "часов"}, {"минута", "минуты", "минут"}};
     if (!(st->num_end == i || (st->num_end == i - 1 && st->s[i - 1] == ' '))) return 0;
-    if (st->L == AR) {   // units written in Arabic: 250 كم, 5 كغ; م after a year is ميلادي (AD), after other numbers متر
-        static const char* const au[][2] = {{"كم", "كيلومتر"}, {"كغ", "كيلوغرام"}, {"كجم", "كيلوغرام"}, {"سم", "سنتيمتر"},
-                                            {"مم", "مليمتر"}, {"مل", "مليلتر"}, {"هـ", "هجرية"}, {0, 0}};
-        for (int k = 0; au[k][0]; k++) {
-            int l = (int)strlen(au[k][0]);
-            if (j - i == l && !strncmp(st->s + i, au[k][0], l)) return word(st->b, au[k][1]), j;
-        }
-        if (j - i == 2 && !strncmp(st->s + i, "م", 2))
-            return word(st->b, st->num_v >= 300 && st->num_v <= 2100 ? "ميلادية" : "متر"), j;
-    }
     for (int k = 0; u[k]; k++) {
         int l = (int)strlen(u[k]);
         if (j - i != l || strncmp(st->s + i, u[k], l)) continue;
         // km/h
         if (k == 2 && j + 1 < st->n && st->s[j] == '/' && st->s[j + 1] == 'h' && !alnum_at(st->s, j + 2, st->n)) {
             static const char* kmh[NL_] = {"kilómetros por hora", "kilometers per hour", "quilômetros por hora",
-                                           "kilomètres heure", "Kilometer pro Stunde", "chilometri orari", "километров в час",
-                                           "كيلومتر في الساعة", "キロ"};
+                                           "kilomètres heure", "Kilometer pro Stunde", "chilometri orari", "километров в час"};
             word(st->b, kmh[st->L]);
             return j + 2;
         }
@@ -1739,10 +1240,8 @@ static int letters(St* st, int i) {
         {"en", "e.g.", "for example"}, {"en", "i.e.", "that is"}, {"en", "etc.", "et cetera"},
         {"de", "z. B.", "zum Beispiel"}, {"de", "z.B.", "zum Beispiel"}, {"de", "d. h.", "das heißt"},
         {"de", "usw.", "und so weiter"}, {"de", "bzw.", "beziehungsweise"}, {"it", "ecc.", "eccetera"},
-        {"fr", "etc.", "et cetera"}, {"pt", "etc.", "et cetera"}, {"it", "etc.", "eccetera"},
-        {"ar", "ق.م.", "قبل الميلاد"}, {"ar", "ق. م.", "قبل الميلاد"}, {"ar", "ق.م", "قبل الميلاد"}, {"ar", "ق. م", "قبل الميلاد"},
-        {0, 0, 0}};
-    static const char* names[NL_] = {"es", "en", "pt", "fr", "de", "it", "ru", "ar", "ja"};
+        {"fr", "etc.", "et cetera"}, {"pt", "etc.", "et cetera"}, {"it", "etc.", "eccetera"}, {0, 0, 0}};
+    static const char* names[NL_] = {"es", "en", "pt", "fr", "de", "it", "ru"};
     for (int k = 0; ab[k][0]; k++) {
         int l = (int)strlen(ab[k][1]);
         if (strcmp(ab[k][0], names[L])) continue;
@@ -1763,7 +1262,7 @@ static int letters(St* st, int i) {
         if (cnt >= 2 && !alnum_at(s, k, n)) {
             sp(b);
             for (int m = 0; m < cnt; m++) {
-                if (m && L != JA) put(b, " ");
+                if (m) put(b, " ");
                 put(b, letter_name(L, (uint8_t)s[i + 2 * m]));
             }
             return k;
@@ -1782,123 +1281,22 @@ static int letters(St* st, int i) {
         }
     }
     // a single letter glued to digits: 9B, 4K, x86, i7, 1080p
-    if (nc == 1 && c[0] < 0x250 && ((j < n && is_digit(s[j])) || (i > 0 && is_digit(s[i - 1])))) {
+    if (nc == 1 && ((j < n && is_digit(s[j])) || (i > 0 && is_digit(s[i - 1])))) {
         word(b, letter_name(L, c[0]) ? letter_name(L, c[0]) : "");
         return j;
     }
     // a plain word: copied (Garlic's own name in Cyrillic for Russian: T3 misreads the Latin letters)
-    if (j - i == 6 && !strncmp(s + i, "Garlic", 6) && (L == RU || L == AR || L == JA))
-        put(b, L == RU ? "Гарлик" : L == AR ? "غارليك" : "ガーリック");
+    if (L == RU && j - i == 6 && !strncmp(s + i, "Garlic", 6)) put(b, "Гарлик");
     else putn(b, s + i, j - i);
     st->century = is_cent;
     return j;
 }
 
-// Japanese text in a piece of another language is not read (the other voices cannot say it): kana, kanji and
-// Japanese punctuation are dropped. Arabic-Indic digits (٠-٩, ۰-۹) and their separators (٫ ٬ ٪) as ASCII.
-static int is_ja_char(uint32_t c) {
-    return (c >= 0x3001 && c <= 0x301F) || (c >= 0x3041 && c <= 0x30FF) || (c >= 0x31F0 && c <= 0x31FF) ||
-           (c >= 0x3400 && c <= 0x4DBF) || (c >= 0x4E00 && c <= 0x9FFF) || (c >= 0xF900 && c <= 0xFAFF) ||
-           (c >= 0xFF61 && c <= 0xFF9F);
-}
-// Japanese numbers written in kanji as digits, for ja_number: 二十五 -> 25, 一億二千万 -> 120000000, 一九四五 -> 1945.
-// A run of two or more numerals unless a kanji follows it (八百屋, 七五三祝い are words); one numeral only before a
-// counter (一人, 三日, 二次). Not 十分 before な, に, で... (enough), nor a run that starts with 万, 億 or 兆 (万一).
-static int ja_numeral(const char* s, int n, int i, int* len) {   // the value 0-9 of a numeral, or 10, 100, ...
-    static const char* d[] = {"〇", "一", "二", "三", "四", "五", "六", "七", "八", "九", "十", "百", "千", "万", "億", "兆", "零"};
-    static const int v[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 100, 1000, 10000, 100000000, -1, 0};
-    for (int k = 0; k < 17; k++)
-        if (n - i >= 3 && !memcmp(s + i, d[k], 3)) return *len = 3, k == 15 ? -2 : v[k];
-    return *len = 0, -3;
-}
-static int ja_kanji_numbers(char* s, int n, int max) {
-    static char out[4096];   // (the digits can be longer than the kanji: 九十億 -> 9000000000)
-    int o = 0;
-    if (max > (int)sizeof(out)) max = (int)sizeof(out);
-    for (int i = 0; i < n && o < max - 24;) {
-        int l, v = ja_numeral(s, n, i, &l), e = i, count = 0, units = 0;
-        if (v < -2 || v >= 10000 || v == -2) {   // (not a numeral, or 万 億 兆 first)
-            int cl;
-            cp(s + i, &cl);
-            memcpy(out + o, s + i, cl);
-            o += cl, i += cl;
-            continue;
-        }
-        for (int x; e < n && (x = ja_numeral(s, n, e, &l)) > -3; e += 3, count++) units += x >= 10 || x == -2;
-        int cl, next_counter = 0, next_kanji = 0;
-        for (int k = 0; ja_ctr[k].w; k++) {   // (ja_counter_at, also for パーセント)
-            int ll = (int)strlen(ja_ctr[k].w);
-            if (n - e >= ll && !memcmp(s + e, ja_ctr[k].w, ll)) next_counter = 1;
-        }
-        if (n - e >= 15 && !memcmp(s + e, "パーセント", 15)) next_counter = 1;
-        uint32_t c = e < n ? cp(s + e, &cl) : 0;
-        next_kanji = (c >= 0x4E00 && c <= 0x9FFF) || (c >= 0x3400 && c <= 0x4DBF);
-        int enough = 0;   // 十分な, 十分に, 十分です: "enough", not ten minutes
-        if (count == 1 && n - i >= 6 && !memcmp(s + i, "十分", 6)) {
-            static const char* after[] = {"な", "に", "で", "だ", "す", "じ", "。", "、", "！", "？", 0};
-            enough = i + 6 >= n || (uint8_t)s[i + 6] < 0x80;
-            for (int k = 0; after[k] && !enough; k++) enough = n - i - 6 >= 3 && !memcmp(s + i + 6, after[k], 3);
-        }
-        if (enough || (count == 1 ? !next_counter : next_kanji && !next_counter) || (!units && !next_counter)) {
-            if (o + (e - i) >= max - 24) break;
-            memcpy(out + o, s + i, e - i);   // (a positional run without a counter, 一四: as written)
-            o += e - i, i = e;
-            continue;
-        }
-        char num[24];
-        int k = 0;
-        if (!units) {   // positional: 二〇二六
-            for (int q = i; q < e && k < 20; q += 3) num[k++] = (char)('0' + ja_numeral(s, n, q, &l));
-        } else {        // with units: 二千二十六, 一億二千万
-            uint64_t total = 0, sec = 0, cur = 0;
-            for (int q = i; q < e; q += 3) {
-                int x = ja_numeral(s, n, q, &l);
-                if (x == -2) x = -1;
-                if (x >= 0 && x < 10) cur = (uint64_t)x;
-                else if (x >= 10 && x <= 1000) sec += (cur ? cur : 1) * (uint64_t)x, cur = 0;
-                else total += (sec + cur) * (x == -1 ? 1000000000000ull : (uint64_t)x), sec = cur = 0;
-            }
-            total += sec + cur;
-            k = snprintf(num, sizeof(num), "%llu", (unsigned long long)total);
-        }
-        memcpy(out + o, num, k);
-        o += k, i = e;
-    }
-    memcpy(s, out, o);
-    s[o] = 0;
-    return o;
-}
-
-static int script_pass(char* s, int n, int max, int L) {
-    if (L == JA) n = ja_kanji_numbers(s, n, max);
-    int o = 0;
-    for (int i = 0; i < n;) {
-        int l;
-        uint32_t c = cp(s + i, &l);
-        if (L != JA && is_ja_char(c)) {
-            i += l;
-            if (o && s[o - 1] == ' ' && i < n && s[i] == ' ') i++;
-            continue;
-        }
-        if (L == AR && ((c >= 0x660 && c <= 0x669) || (c >= 0x6F0 && c <= 0x6F9))) s[o++] = (char)('0' + (c & 15)), i += l;
-        else if (L == AR && c == 0x66B) s[o++] = '.', i += l;
-        else if (L == AR && c == 0x66C) s[o++] = ',', i += l;
-        else if (L == AR && c == 0x66A) s[o++] = '%', i += l;
-        else {
-            memmove(s + o, s + i, l);
-            o += l, i += l;
-        }
-    }
-    s[o] = 0;
-    return o;
-}
-
 int st_speak(char* s, int n, int max, const char* lang) {
     static char out[4096];
-    Buf b = {out, 0, (int)sizeof(out) < max ? (int)sizeof(out) : max, 0};
+    Buf b = {out, 0, (int)sizeof(out) < max ? (int)sizeof(out) : max};
     out[0] = 0;
-    St st = {s, n, lang_of(lang), &b, {0}, 0, 0, -1, 0, 0};
-    n = st.n = script_pass(s, n, max, st.L);
+    St st = {s, n, lang_of(lang), &b, {0}, 0, 0, -1, 0};
     if (st.L < 0) return n;   // (Greek and the rest: as written)
     for (int i = 0; i < n;) {
         int l;
@@ -1906,27 +1304,20 @@ int st_speak(char* s, int n, int max, const char* lang) {
         int j;
         if (is_digit(s[i])) {
             // a minus sign before it: "-5 °C" (copied just before)
-            if (i >= 1 && s[i - 1] == '-' && (i == 1 || s[i - 2] == ' ' || (st.L == JA && !is_digit(s[i - 2]))) &&
-                b.n && b.p[b.n - 1] == '-') {
-                static const char* minus[NL_] = {"menos", "minus", "menos", "moins", "minus", "meno", "минус", "سالب", "マイナス"};
+            if (i >= 1 && s[i - 1] == '-' && (i == 1 || s[i - 2] == ' ') && b.n && b.p[b.n - 1] == '-') {
+                static const char* minus[NL_] = {"menos", "minus", "menos", "moins", "minus", "meno", "минус"};
                 b.p[--b.n] = 0;
                 word(&b, minus[st.L]);
             }
-            int wa = st.L == AR && i >= 2 && !memcmp(s + i - 2, "و", 2) && (i == 2 || s[i - 3] == ' ');
-            if (wa) b.glue = 1;   // و5 -> وخمسة (Arabic writes و together with the word after it)
-            else if (b.n && b.p[b.n - 1] != ' ' && prev_alnum(s, i) && st.L != JA) put(&b, " ");   // PS4 -> pe ese cuatro
+            if (b.n && b.p[b.n - 1] != ' ' && prev_alnum(s, i)) put(&b, " ");   // PS4 -> pe ese cuatro
             uint64_t v = 0;
             for (int k = i; k < n && is_digit(s[k]) && k < i + 18; k++) v = v * 10 + (uint64_t)(s[k] - '0');
-            // Japanese: a number right after a kanji is kept apart from it (U+200B, which the tokenizer drops):
-            // its reading in hiragana would otherwise be taken for the kanji's okurigana (約さんじゅう -> 約さ, つまさ)
-            if (st.L == JA && b.n >= 3 && (uint8_t)b.p[b.n - 3] >= 0xE4 && (uint8_t)b.p[b.n - 3] <= 0xE9)
-                put(&b, "\xE2\x80\x8B");
             j = number(&st, i);
             if (j <= i) j = i + 1, putn(&b, s + i, 1);
             st.num_end = j, st.num_v = v;
             st.prev[0] = 0, st.prev_cap = 0;
         } else if (is_letter(c) && (!prev_alnum(s, i) || is_digit(s[i - 1]))) {
-            if (i > 0 && is_digit(s[i - 1]) && b.n && b.p[b.n - 1] != ' ' && st.L != JA) put(&b, " ");   // 5kg, 9B
+            if (i > 0 && is_digit(s[i - 1]) && b.n && b.p[b.n - 1] != ' ') put(&b, " ");   // 5kg, 9B
             char w[32];
             lower_word(s, n, i, w, sizeof(w));
             int cen = st.century;
@@ -1950,8 +1341,7 @@ int st_speak(char* s, int n, int max, const char* lang) {
             if (k >= 2 && b.p[k - 1] == '.' && (b.p[k - 2] | 32) == 'n' && (k == 2 || b.p[k - 3] == ' ')) k -= 2;
             else if (k >= 1 && (b.p[k - 1] | 32) == 'n' && (k == 1 || b.p[k - 2] == ' ')) k -= 1;
             if (k != b.n) {
-                static const char* num[NL_] = {"número", "number", "número", "numéro", "Nummer", "numero", "номер", "رقم",
-                                               "ばんごう"};
+                static const char* num[NL_] = {"número", "number", "número", "numéro", "Nummer", "numero", "номер"};
                 b.n = k, b.p[k] = 0;
                 word(&b, num[st.L]);
             }

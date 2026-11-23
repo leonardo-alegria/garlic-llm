@@ -4,12 +4,10 @@
                  RSRC1/2, user SGPRs)
   model.idx      model shape + where every tensor sits in the weights file (which stays in /data on the PS4)
   tokenizer.bin  byte-level BPE: raw bytes of every token id, merge table in rank order, byte -> id map
-  font.bin       text font: Selawik and Noto Sans (+ Noto Sans Arabic, Arimo, DejaVu Sans and the Noto symbol
-                 fonts) + Twemoji (CC-BY 4.0) incl. flags and sequences + Chinese, Japanese and Korean (Noto Sans SC,
-                 JP, TC, KR) at 4 bits a pixel
-  font_bold.bin / font_italic.bin  bold / italic (markdown), Latin, Cyrillic + Arabic (bold)
-  font_small.bin text at 24 px (hints, chips);  font_big.bin  titles (semibold at 40 px + keyboard emoji); both
-                 with the Chinese, Japanese and Korean characters of the interface's own text
+  font.bin       text font: Selawik and Noto Sans (+ Arimo, DejaVu Sans and the Noto symbol fonts) + Twemoji
+                 (CC-BY 4.0) incl. flags and sequences
+  font_bold.bin / font_italic.bin  bold / italic (markdown), Latin + Cyrillic
+  font_small.bin text at 24 px (hints, chips);  font_big.bin  titles (semibold at 40 px + keyboard emoji)
   mono.bin       code (Inconsolata, Cascadia Mono for Cyrillic)
 
 The font files are read from pc/fonts_libres and the emoji from third_party/twemoji: both are downloaded, not part of
@@ -32,7 +30,6 @@ MAX_SEQ = 2048
 EXTRA_CHARS = "‘’‚“”„–—…•◦▪€™←↑→↓↕·"
 TEXT_FACE = "segoeui.ttf"
 TEXT_RANGES = [(32, 127), (160, 0x250), (0x400, 0x460), (0x2010, 0x2028)]   # Latin, Cyrillic, punctuation
-VAR_JP, VAR_TC, UI_VAR = 0x200000, 0x400000, 0x800000   # see chat/ui.c
 
 
 def export_kernels(shader="qwen3"):
@@ -161,30 +158,15 @@ SKIP = set(range(0x200B, 0x2010)) | set(range(0xFE00, 0xFE10)) | set(range(0x1F3
 SEQ_BASE = 0x110000                    # records for multi-codepoint emoji use codepoints past Unicode
 MONO_RANGES = [(32, 127), (160, 384), (0x400, 0x460), (0x2010, 0x2028), (0x2190, 0x2200), (0x2500, 0x25A0)]
 
-def arabic_codepoints():
-    """The Arabic block and the contextual forms chat/ui.c draws (pc/gen_arabic_forms.py), not the other
-    presentation forms (ligatures it never asks for)."""
-    from gen_arabic_forms import forms
-    table, lam_alef = forms()
-    return frozenset(set(range(0x0600, 0x0700)) | {f for row in table.values() for f in row if f} |
-                     {f for pair in lam_alef.values() for f in pair if f})
-
-
-ARABIC = arabic_codepoints()
-
 # Two sets of faces, by role; within a role the first face that has a character draws it. A face is
-# (file, weight of a variable font or None, scale[, highest codepoint it may draw, or the set of codepoints it may
-# draw]). "windows" are the Windows faces
+# (file, weight of a variable font or None, scale[, highest codepoint it may draw]). "windows" are the Windows faces
 # the app first had (not ours to ship); "free" (pc/fonts_libres, SIL OFL 1.1 except DejaVu's own free licence) look
 # as close to them as we found: Selawik is Microsoft's open stand-in for Segoe UI with the same widths, but Latin
 # only, so Noto Sans (scaled to Segoe UI's x-height) draws Cyrillic, Greek and the rest, and Noto Sans Italic the
 # italics (Selawik has none). With "free" every font keeps the line height and baseline of the face it replaces
-# (LINE below), so the layout does not move. Arabic: Noto Sans Arabic, at the scale of the Latin Noto Sans it
-# was drawn with. Chinese, Japanese and Korean: Noto Sans SC, JP, TC and KR (the same design in each region's
-# forms).
+# (LINE below), so the layout does not move.
 FREE = ROOT / "pc" / "fonts_libres"
 NOTO_X = 0.5 / 0.536                   # Segoe UI's x-height / Noto Sans's
-NOTO_AR = f"{FREE}/NotoSansArabic/NotoSansArabic[wdth,wght].ttf"
 FACE_SETS = {
     "windows": {
         "text": [(FONTS + "segoeui.ttf", None, 1)], "bold": [(FONTS + "segoeuib.ttf", None, 1)],
@@ -192,16 +174,13 @@ FACE_SETS = {
         "arial": [(FONTS + "arial.ttf", None, 1)], "symbols": [(FONTS + "seguisym.ttf", None, 1)],
         "emoji": [(FONTS + "seguiemj.ttf", None, 1)], "mono": [(FONTS + "consola.ttf", None, 1)],
         "zh": [(FONTS + "msyh.ttc", None, 1)], "ko": [(FONTS + "malgun.ttf", None, 1)],
-        "ja": [(FONTS + "YuGothR.ttc", None, 1)], "tc": [(FONTS + "msjh.ttc", None, 1)],
     },
     "free": {
-        "text": [(f"{FREE}/Selawik/selawk.ttf", None, 1), (f"{FREE}/NotoSans/NotoSans[wdth,wght].ttf", 400, NOTO_X),
-                 (NOTO_AR, 400, NOTO_X, ARABIC)],
-        "bold": [(f"{FREE}/Selawik/selawkb.ttf", None, 1), (f"{FREE}/NotoSans/NotoSans[wdth,wght].ttf", 700, NOTO_X),
-                 (NOTO_AR, 700, NOTO_X, ARABIC)],
+        "text": [(f"{FREE}/Selawik/selawk.ttf", None, 1), (f"{FREE}/NotoSans/NotoSans[wdth,wght].ttf", 400, NOTO_X)],
+        "bold": [(f"{FREE}/Selawik/selawkb.ttf", None, 1), (f"{FREE}/NotoSans/NotoSans[wdth,wght].ttf", 700, NOTO_X)],
         "italic": [(f"{FREE}/NotoSans/NotoSans-Italic[wdth,wght].ttf", 400, NOTO_X)],
         "semibold": [(f"{FREE}/Selawik/selawksb.ttf", None, 1),
-                     (f"{FREE}/NotoSans/NotoSans[wdth,wght].ttf", 600, NOTO_X), (NOTO_AR, 600, NOTO_X, ARABIC)],
+                     (f"{FREE}/NotoSans/NotoSans[wdth,wght].ttf", 600, NOTO_X)],
         "arial": [(f"{FREE}/Arimo/Arimo[wght].ttf", 400, 1, 0x1FFF)],   # letters only: its arrows / math are narrow
         # DejaVu Sans (scaled to Segoe UI's x-height) has the arrows, math and shapes closest to Segoe UI Symbol's
         "symbols": [(f"{FREE}/DejaVu/DejaVuSans.ttf", None, 0.914),
@@ -217,8 +196,6 @@ FACE_SETS = {
 
         "zh": [(f"{FREE}/NotoSansSC/NotoSansSC[wght].ttf", 400, 1)],
         "ko": [(f"{FREE}/NotoSansKR/NotoSansKR[wght].ttf", 400, 1)],
-        "ja": [(f"{FREE}/NotoSansJP/NotoSansJP[wght].ttf", 400, 1)],
-        "tc": [(f"{FREE}/NotoSansTC/NotoSansTC[wght].ttf", 400, 1)],
     },
 }
 LINE = {"mono": (1521, 527, 2048)}     # (ascender, descender, units per em) of Consolas; the rest: Segoe UI's
@@ -240,159 +217,28 @@ def load_face(spec, size):
     return f
 
 
-def allowed(spec, cp):
-    """May face spec draw cp (its optional fourth element: the highest codepoint, or a set of them)?"""
-    if len(spec) < 4:
-        return True
-    return cp in spec[3] if isinstance(spec[3], frozenset) else cp <= spec[3]
-
-
 def font_cmaps(specs):
     from fontTools.ttLib import TTFont
-    return {s: {cp for cp in TTFont(s[0], lazy=True, fontNumber=0).getBestCmap() if allowed(s, cp)} for s in specs}
-
-
-def charset(encoding, rows, cols):
-    """The characters of a two-byte encoding, rows x cols."""
-    out = set()
-    for b1 in rows:
-        for b2 in cols:
-            try:
-                out.add(ord(bytes([b1, b2]).decode(encoding)))
-            except UnicodeDecodeError:
-                pass
-    return out
-
-
-def cjk_variant_cp(cp):
-    """Characters that may have forms of their own per language (cjk_variant_cp in chat/ui.c)."""
-    return (0x2E80 <= cp <= 0x9FFF or 0xAC00 <= cp <= 0xD7A3 or 0xF900 <= cp <= 0xFAFF or 0xFE30 <= cp <= 0xFE4F or
-            0xFF00 <= cp <= 0xFFEF or 0x1100 <= cp <= 0x11FF or 0x20000 <= cp <= 0x3FFFF)
-
-
-CJK_PUNCT = set(range(0x3000, 0x3040)) | set(range(0xFF01, 0xFF5F))   # CJK punctuation, full-width forms
+    return {s: {cp for cp in TTFont(s[0], lazy=True, fontNumber=0).getBestCmap() if len(s) < 4 or cp <= s[3]}
+            for s in specs}
 
 
 def cjk_codepoints():
-    """Common East Asian characters at their own codepoints: the 6,763 hanzi of GB2312, kana, CJK punctuation and
-    full-width forms (in Simplified Chinese forms), the 2,350 hangul syllables of KS X 1001 and the jamo."""
+    """Common East Asian characters: the 6,763 hanzi of GB2312, kana, CJK punctuation and full-width forms
+    (Microsoft YaHei), and the 2,350 hangul syllables of KS X 1001 (Malgun Gothic)."""
+    def charset(encoding, rows, cols):
+        out = set()
+        for b1 in rows:
+            for b2 in cols:
+                try:
+                    out.add(ord(bytes([b1, b2]).decode(encoding)))
+                except UnicodeDecodeError:
+                    pass
+        return out
     yahei = charset("gb2312", range(0xB0, 0xF8), range(0xA1, 0xFF))
-    yahei |= CJK_PUNCT | set(range(0x3040, 0x3100))
+    yahei |= set(range(0x3000, 0x3040)) | set(range(0x3040, 0x3100)) | set(range(0xFF01, 0xFF5F))
     hangul = charset("euc-kr", range(0xB0, 0xC9), range(0xA1, 0xFF))
-    hangul = {cp for cp in hangul if 0xAC00 <= cp <= 0xD7A3} | set(range(0x3131, 0x318F))   # + the lone jamo
-    return {cp: "zh" for cp in yahei} | {cp: "ko" for cp in hangul}
-
-
-def cjk_variants():
-    """{key: (role, codepoint)}: the Japanese forms of JIS X 0208 (its 6,355 kanji, kana, punctuation and full-width
-    forms) at VAR_JP + codepoint, and the Traditional Chinese forms of Big5's 5,401 common hanzi, its bopomofo and
-    punctuation at VAR_TC + codepoint. export_font keeps only those that differ from the glyph at the codepoint
-    itself (or that it lacks)."""
-    big5_cols = list(range(0x40, 0x7F)) + list(range(0xA1, 0xFF))
-    jis = charset("euc_jp", range(0xA1, 0xF5), range(0xA1, 0xFF)) | CJK_PUNCT | set(range(0x3040, 0x3100))
-    big5 = charset("big5", range(0xA1, 0xA4), big5_cols) | charset("big5", range(0xA4, 0xC7), big5_cols) | CJK_PUNCT
-    out = {VAR_JP + cp: ("ja", cp) for cp in jis if cjk_variant_cp(cp)}
-    out |= {VAR_TC + cp: ("tc", cp) for cp in big5 if cjk_variant_cp(cp)}
-    return out
-
-
-UI_TEXT = ROOT / "chat" / "ui_strings.inc"
-# LANG_* order (chat/ui.h); the languages whose interface text gets glyphs of its own at 24 and 40 px, with the
-# role of its face and the codepoint offset of its forms
-LANGS = ["es", "en", "pt", "ru", "fr", "de", "ar", "ja", "zh-Hans", "zh-Hant", "ko"]
-UI_CJK = {"ja": ("ja", VAR_JP), "zh-Hans": ("zh", 0), "zh-Hant": ("tc", VAR_TC), "ko": ("ko", 0)}
-# the strings drawn as titles (font_big); text drawn in the chat, toasts and what only the model reads are left out
-# of the hint size (font_small)
-BIG_STRINGS = {"S_LISTENING", "S_TRANSCRIBING", "S_ERROR_TITLE", "S_PY_DONE", "S_PY_ERROR", "S_PY_STOPPED",
-               "S_PY_STARTING", "S_MODEL_BAD_TITLE"}
-NOT_SMALL = {"S_SYSTEM_PROMPT", "S_PY_FIX_MSG", "S_PY_FIX_ASK", "S_CONTEXT_FULL", "S_API_DONE", "S_TAGLINE",
-             "S_PLACEHOLDER", "S_NO_MIC", "S_NO_SPEECH", "S_ASR_OFF", "S_HOLD_LONGER", "S_THINK_ON_TOAST",
-             "S_THINK_OFF_TOAST", "S_API_ON", "S_API_OFF", "S_API_FAILED", "S_API_BUSY", "S_VOICE_NO_TTS",
-             "S_VOICE_LOADING", "S_PY_INPUT", "S_LISTENING_SHORT", "S_THINKING", "S_MODEL_TITLE",
-             "S_MODEL_BAD"} | BIG_STRINGS
-
-
-def c_group(text, i):
-    """The brace group of C initializers starting at text[i] == "{": a list of elements, each a string (adjacent
-    literals joined) or a nested list. Comments are skipped."""
-    assert text[i] == "{"
-    i += 1
-    out, cur, pending = [], None, False
-    while True:
-        c = text[i]
-        if text.startswith("//", i):
-            i = text.index("\n", i)
-        elif c == '"':
-            j, lit = i + 1, []
-            while text[j] != '"':
-                if text[j] == "\\":
-                    e = text[j + 1]
-                    if e == "u":
-                        lit.append(chr(int(text[j + 2:j + 6], 16)))
-                        j += 6
-                        continue
-                    lit.append({"n": "\n", "t": "\t"}.get(e, e))
-                    j += 2
-                    continue
-                lit.append(text[j])
-                j += 1
-            cur = (cur or "") + "".join(lit)
-            pending, i = True, j + 1
-        elif c == "{":
-            cur, i = c_group(text, i)
-            pending = True
-        elif c == ",":
-            out.append(cur)
-            cur, pending, i = None, False, i + 1
-        elif c == "}":
-            if pending:
-                out.append(cur)
-            return out, i + 1
-        else:
-            i += 1
-
-
-def ui_strings():
-    """{StrId name: [the string in each language]} and [the emoji page titles of each language] from
-    chat/ui_strings.inc, and {language: [names]} of the Python key names (chat/assets/py/_gx.py)."""
-    import ast
-    import re
-    text = UI_TEXT.read_text(encoding="utf-8")
-    table = {}
-    start = text.index("strings[N_STRINGS][N_LANGS] = {")
-    end = text.index("\n};", start)
-    for m in re.finditer(r"\[(S_\w+)\] = \{", text[start:end]):
-        table[m.group(1)] = c_group(text, start + m.end() - 1)[0]
-    titles = c_group(text, text.index("{", text.index("emoji_titles[N_LANGS]")))[0]
-    gx = (ROOT / "chat" / "assets" / "py" / "_gx.py").read_text(encoding="utf-8")
-    names = ast.literal_eval(re.search(r"_NAMES = (\{.*?\}\})", gx, re.S).group(1))
-    return table, titles, {lang: list(v.values()) for lang, v in names.items()}
-
-
-def ui_cjk_chars(big):
-    """{key: (role, codepoint)}: the Chinese, Japanese and Korean characters of the interface's own text, each at
-    UI_VAR + its language's offset + codepoint. big: those of the titles (font_big), else those of the hints."""
-    table, titles, py_names = ui_strings()
-    out = {}
-    for li, lang in enumerate(LANGS):
-        if lang not in UI_CJK:
-            continue
-        role, off = UI_CJK[lang]
-        texts = [v[li] for k, v in table.items() if (k in BIG_STRINGS) == big and (big or k not in NOT_SMALL)]
-        if not big:
-            texts += list(titles[li]) + py_names.get(lang, [])
-        for cp in sorted({ord(c) for t in texts for c in t if cjk_variant_cp(ord(c))}):
-            out.setdefault(UI_VAR + off + cp, (role, cp))
-    return out
-
-
-def pack4(data):
-    """8-bit coverage -> 4 bits a pixel, two a byte (the first in the low half), as glyph_alpha in chat/ui.c reads
-    them."""
-    q = [(v * 15 + 127) // 255 for v in data]
-    if len(q) % 2:
-        q.append(0)
-    return bytes(q[k] | q[k + 1] << 4 for k in range(0, len(q), 2))
+    return {cp: "zh" for cp in yahei} | {cp: "ko" for cp in hangul if 0xAC00 <= cp <= 0xD7A3}
 
 
 def twemoji_files():
@@ -404,22 +250,15 @@ def twemoji_files():
     return out
 
 
-def export_font(fname, size, full=True, role="text", emoji=(), emoji_size=None, ui_cjk=None):
+def export_font(fname, size, full=True, role="text", emoji=(), emoji_size=None):
     """PFN2: header <4sHHII (magic, line height, ascent, glyph count, bitmap bytes); per glyph <IHHhhHBBI
-    (codepoint, width, height, left, top, advance, kind 0 = alpha / 1 = RGBA / 2 = 4-bit alpha, pad, bitmap
-    offset), sorted by codepoint; then the bitmaps (1 or 4 bytes per pixel, or 4 bits); then, if any, the emoji
-    sequences: <4sI ("SEQS", count) and per sequence <BBHI (length, 0, 0, glyph index) followed by its codepoints
-    (u32, FE0F removed).
-    role: the faces of FACE_SETS[face_set] that draw it ("text", "bold", "italic", "semibold", "mono").
-    full: the text font, with every script; Chinese, Japanese and Korean at 4 bits a pixel (identical bitmaps
-    stored once), the Japanese and Traditional Chinese forms at VAR_JP / VAR_TC + codepoint when they differ.
-    ui_cjk: the weight of the interface's Chinese, Japanese and Korean characters (ui_cjk_chars), or None."""
+    (codepoint, width, height, left, top, advance, kind 0 = alpha / 1 = RGBA, pad, bitmap offset), sorted by
+    codepoint; then the bitmaps (1 or 4 bytes per pixel); then, if any, the emoji sequences: <4sI ("SEQS", count)
+    and per sequence <BBHI (length, 0, 0, glyph index) followed by its codepoints (u32, FE0F removed).
+    role: the faces of FACE_SETS[face_set] that draw it ("text", "bold", "italic", "semibold", "mono")."""
     from PIL import Image, ImageDraw
     fs = FACE_SETS[face_set]
-    cjk_roles = ("zh", "ko", "ja", "tc")
-    if ui_cjk:                                         # the CJK faces at this font's weight
-        fs = dict(fs, **{r: [(s[0], ui_cjk, *s[2:]) for s in fs[r]] for r in cjk_roles})
-    roles = ("emoji", "text", "arial", "symbols") + cjk_roles if full else (role,) + (cjk_roles if ui_cjk else ())
+    roles = ("emoji", "text", "arial", "symbols", "zh", "ko") if full else (role,)
     specs = list(dict.fromkeys(s for r in roles + (role, "arial") for s in fs[r]))
     cmaps = font_cmaps(specs)
     faces = {s: load_face(s, size) for s in specs}
@@ -432,7 +271,6 @@ def export_font(fname, size, full=True, role="text", emoji=(), emoji_size=None, 
     emoji_px = emoji_size or int(round(size * 0.95))
     tw = twemoji_files() if full else {}
     plan, seqs = {}, []
-    real, four = {}, set()                             # key -> the codepoint it draws; keys drawn at 4 bits
 
     def first(chain, cp):
         return next((s for s in chain if cp in cmaps[s]), None)
@@ -452,20 +290,12 @@ def export_font(fname, size, full=True, role="text", emoji=(), emoji_size=None, 
             s = first(fs[r], cp)
             if cp not in plan and s:
                 plan[cp] = s
-                four.add(cp)
-        for key, (r, cp) in cjk_variants().items():   # their Japanese and Traditional Chinese forms
-            s = first(fs[r], cp)
-            if s:
-                plan[key], real[key] = s, cp
-                four.add(key)
         for k, (cps, path) in enumerate(sorted((c, p) for c, p in tw.items() if len(c) > 1)):
             plan[SEQ_BASE + k] = path
             seqs.append(cps)
     else:
         cps_wanted = [cp for lo, hi in (MONO_RANGES if role == "mono" else TEXT_RANGES)
                       for cp in range(lo, hi)] + [ord(c) for c in EXTRA_CHARS] + [0xFFFD]
-        if role != "mono":
-            cps_wanted += sorted(ARABIC - set(cps_wanted))
         for cp in cps_wanted:
             s = first(fs[role], cp)
             if s or cp == 0xFFFD:
@@ -479,23 +309,19 @@ def export_font(fname, size, full=True, role="text", emoji=(), emoji_size=None, 
                 else:
                     plan[SEQ_BASE + len(seqs)] = tw[cps]
                     seqs.append(cps)
-        for key, (r, cp) in (ui_cjk_chars(role == "semibold").items() if ui_cjk else ()):
-            s = first(fs[r], cp)
-            if s:
-                plan[key], real[key] = s, cp
     plan.setdefault(0xFFFD, fs["arial"][0] if full else base)
     recs, bitmaps = [], bytearray()
-    index, plain4, shared = {}, {}, {}                 # plain4: the 4-bit glyphs at their own codepoints
+    index = {}
     for cp in sorted(plan):
         src = plan[cp]
+        index[cp] = len(recs)
         if not isinstance(src, tuple):                 # a Twemoji PNG
-            index[cp] = len(recs)
             img = Image.open(src).convert("RGBA").resize((emoji_px, emoji_px), Image.LANCZOS)
             top = ascent - emoji_px + int(round(size * 0.12)) if not emoji_size else (ascent + descent - emoji_px) // 2
             recs.append(struct.pack("<IHHhhHBBI", cp, emoji_px, emoji_px, 1, top, emoji_px + 2, 1, 0, len(bitmaps)))
             bitmaps += img.tobytes()
             continue
-        ch, f = chr(real.get(cp, cp)), faces[src]
+        ch, f = chr(cp), faces[src]
         color = src in fs["emoji"]
         dy = ascent - f.getmetrics()[0]                # line the font up on the base font's baseline
         left, top, right, bottom = f.getbbox(ch)
@@ -509,21 +335,8 @@ def export_font(fname, size, full=True, role="text", emoji=(), emoji_size=None, 
             data = img.tobytes()
             if not any(data):
                 data, w, h = b"", 0, 0
-        kind = 1 if color and data else 0
-        if cp in four and data:
-            data, kind = pack4(data), 2
-        glyph = (w, h, left, top + dy, adv, data)
-        if cp in four and cp < VAR_JP:
-            plain4[cp] = glyph
-        elif cp in real and cp < UI_VAR and plain4.get(real[cp]) == glyph:
-            continue                                   # the same form as at the codepoint itself
-        index[cp] = len(recs)
-        off = len(bitmaps)
-        if kind == 2:                                  # identical 4-bit bitmaps (a Japanese and a Traditional
-            off = shared.setdefault(data, off)         # form alike) are stored once
-        recs.append(struct.pack("<IHHhhHBBI", cp, w, h, left, top + dy, adv, kind, 0, off))
-        if off == len(bitmaps):
-            bitmaps += data
+        recs.append(struct.pack("<IHHhhHBBI", cp, w, h, left, top + dy, adv, 1 if color and data else 0, 0, len(bitmaps)))
+        bitmaps += data
     head = struct.pack("<4sHHII", b"PFN2", ascent + descent, ascent, len(recs), len(bitmaps))
     tail = b""
     if seqs:
@@ -532,11 +345,8 @@ def export_font(fname, size, full=True, role="text", emoji=(), emoji_size=None, 
             tail += struct.pack("<BBHI", len(cps), 0, 0, index[SEQ_BASE + k]) + struct.pack(f"<{len(cps)}I", *cps)
     (font_out / fname).write_bytes(head + b"".join(recs) + bytes(bitmaps) + tail)
     n_tw = sum(1 for v in plan.values() if not isinstance(v, tuple))
-    n_var = sum(1 for k in index if VAR_JP <= k < UI_VAR)
-    n_ui = sum(1 for k in index if k >= UI_VAR)
-    print(f"{fname}: {len(recs)} glyphs at {size}px ({n_tw} Twemoji incl. {len(seqs)} sequences, {n_var} Japanese / "
-          f"Traditional Chinese forms, {n_ui} interface CJK), "
-          f"{(len(head) + 20 * len(recs) + len(bitmaps) + len(tail)) / 2**20:.2f} MiB")
+    print(f"{fname}: {len(recs)} glyphs at {size}px ({n_tw} Twemoji incl. {len(seqs)} sequences), "
+          f"{(len(head) + 20 * len(recs) + len(bitmaps) + len(tail)) / 2**20:.1f} MiB")
 
 
 def main():
@@ -561,10 +371,9 @@ def main():
     export_font("font.bin", 30, full=True)
     export_font("font_bold.bin", 30, full=False, role="bold")
     export_font("font_italic.bin", 30, full=False, role="italic")
-    export_font("font_small.bin", 24, full=False, role="text", ui_cjk=400)
+    export_font("font_small.bin", 24, full=False, role="text")
     from gen_emoji_pages import keyboard_emoji
-    export_font("font_big.bin", 40, full=False, role="semibold", emoji=keyboard_emoji(), emoji_size=25,   # keys
-                ui_cjk=600)                                                                           # ~25 px
+    export_font("font_big.bin", 40, full=False, role="semibold", emoji=keyboard_emoji(), emoji_size=25)   # keys ~25 px
     export_font("mono.bin", 26, full=False, role="mono")
 
 

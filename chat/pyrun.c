@@ -350,7 +350,8 @@ static mp_obj_t g_input(size_t n, const mp_obj_t* a) {
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(g_input_obj, 0, 1, g_input);
 
 static mp_obj_t g_lang(void) {
-    return MP_OBJ_NEW_QSTR(qstr_from_str(lang_codes[ui_lang >= 0 && ui_lang < N_LANGS ? ui_lang : LANG_EN]));
+    static const char* codes[] = {"es", "en", "pt", "ru"};
+    return MP_OBJ_NEW_QSTR(qstr_from_str(codes[ui_lang >= 0 && ui_lang < N_LANGS ? ui_lang : 1]));
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(g_lang_obj, g_lang);
 
@@ -425,7 +426,7 @@ static int exec_source(const char* src, size_t len, const char* name) {
 const char* py_error(void) { return err; }
 
 int py_run(const PyHost* host, const char* source, const char* name) {
-    // The heap: 64 MiB if the system RAM has it, else less: the dictation weights (338 MiB) live in that
+    // The heap: 64 MiB if the system RAM has it, else less: Parakeet's dictation weights (338 MiB) live in that
     // RAM, so 64 MiB are not always free.
     static char* heap;
     static size_t heap_size;

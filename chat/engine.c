@@ -88,18 +88,6 @@ static void weights_locate(char* path) {
     say("weights: %s", path);
 }
 
-const char* eng_model_dir;   // (engine.h) the models folder's choice
-const char* eng_mtp_dir;
-
-// A weights file of the chosen model's folder instead: the same file name, in dir.
-static void weights_in(char* path, const char* dir) {
-    const char* base = strrchr(path, '/');
-    char p[129];
-    snprintf(p, sizeof(p), "%s/%s", dir, base ? base + 1 : path);
-    strcpy(path, p);
-    say("weights: %s (models folder)", path);
-}
-
 static uint8_t* read_file(const char* path, size_t* size) {
     int f = open(path, O_RDONLY);
     if (f < 0) return NULL;
@@ -293,8 +281,7 @@ static int load_index(Engine* e, const char* dir) {
     memcpy(&e->rope_theta, d + 48, 4);
     memcpy(e->weights_path, d + 52, 128);
     e->weights_path[128] = 0;
-    if (eng_model_dir) weights_in(e->weights_path, eng_model_dir);
-    else weights_locate(e->weights_path);
+    weights_locate(e->weights_path);
     memcpy(&e->weights_size, d + 180, 8);
     memcpy(&e->n_tensors, d + 188, 4);
     uint32_t rec0 = 192, vocab_map = 0;
@@ -1384,10 +1371,9 @@ static void swar_tune(Engine* e) {
 
 
 
-// ---- speech to text: Parakeet TDT 0.6B v3 or Nemotron 3.5 ASR ---------------------------------------------------
-// One of the two is loaded. Mel features on the CPU, encoder on the GPU in one submission, then the greedy loop, one
-// GPU step per decision (prediction network when a token was emitted, joint, argmax). Parakeet's joint also says how
-// many frames to move on (TDT); Nemotron's is plain RNN-T: a blank moves on by one frame.
+// ---- speech to text: Parakeet TDT 0.6B v3 -----------------------------------------------------------------------
+// Mel features on the CPU, encoder on the GPU in one submission, then the TDT greedy loop, one GPU step per decision
+// (prediction network when a token was emitted, joint, argmax).
 
 static const AsrTensor* at(Engine* e, const char* name) {
     for (uint32_t i = 0; i < e->asr.nt; i++)
@@ -1406,43 +1392,14 @@ static uint64_t AWf(Engine* e, const char* fmt, int i) {
     return AW(e, n);
 }
 
-static float half_to_float(uint16_t h) {
-    uint32_t s = (uint32_t)(h >> 15) << 31, ex = (h >> 10) & 31, m = h & 1023, f;
-    if (ex == 31)
-        f = s | 0x7F800000u | m << 13;
-    else if (ex)
-        f = s | (ex + 112) << 23 | m << 13;
-    else if (!m)
-        f = s;
-    else {   // subnormal
-        ex = 113;
-        while (!(m & 1024)) m <<= 1, ex--;
-        f = s | ex << 23 | (m & 1023) << 13;
-    }
-    float r;
-    memcpy(&r, &f, 4);
-    return r;
-}
-
-static void asr_free(Asr* a) {
-    free(a->t), free(a->vocab), free(a->piece), free(a->mel);
-    a->t = NULL, a->vocab = NULL, a->piece = NULL, a->mel = NULL;
-}
-
-int asr_init(Engine* e, const char* dir, int model, int prompt) {
+int asr_init(Engine* e, const char* dir) {
     Asr* a = &e->asr;
     memset(a, 0, sizeof(*a));
-    int nm = model == ASR_NEMOTRON;
-    a->kind = nm ? ASR_NEMOTRON : ASR_PARAKEET;
-    a->prompt = prompt >= 0 && prompt < 128 ? prompt : 0;
-    a->n_vocab = nm ? 13088 : 8193;   // the blank is the last
-    a->blank = a->n_vocab - 1;
-    a->n_dur = nm ? 0 : 5;
     char path[256];
     size_t size;
-    snprintf(path, sizeof(path), "%s/%s", dir, nm ? "asr_nm.idx" : "asr.idx");
+    snprintf(path, sizeof(path), "%s/asr.idx", dir);
     uint8_t* d = read_file(path, &size);
-    if (!d || memcmp(d, nm ? "NASR" : "PASR", 4)) {
+    if (!d || memcmp(d, "PASR", 4)) {
         free(d);
         return -1;
     }
@@ -1463,30 +1420,16 @@ int asr_init(Engine* e, const char* dir, int model, int prompt) {
         memcpy(&a->t[i].scales, r + 56, 8);
     }
     free(d);
-    // no memory is taken unless the whole weights file is there (else the caller may try the other model)
-    int wf = open(a->path, O_RDONLY);
-    off_t wlen = wf >= 0 ? lseek(wf, 0, SEEK_END) : -1;
-    if (wf >= 0) close(wf);
-    if (wlen < (off_t)a->size) {
-        say("asr: %s missing or incomplete", a->path);
-        asr_free(a);
-        return -1;
-    }
-    snprintf(path, sizeof(path), "%s/%s", dir, nm ? "asr_nm_vocab.bin" : "asr_vocab.bin");
+    snprintf(path, sizeof(path), "%s/asr_vocab.bin", dir);
     a->vocab = read_file(path, &size);
-    if (!a->vocab || memcmp(a->vocab, "PVOC", 4)) {
-        asr_free(a);
-        return -1;
-    }
-    memcpy(&a->n_pieces, a->vocab + 4, 4);
-    a->piece = malloc(a->n_pieces * sizeof(uint32_t));
-    for (uint32_t i = 0, o = 8; i < a->n_pieces; i++) {
+    if (!a->vocab || memcmp(a->vocab, "PVOC", 4)) return -1;
+    a->piece = malloc(8192 * sizeof(uint32_t));
+    for (uint32_t i = 0, o = 8; i < 8192; i++) {
         a->piece[i] = o;
         o += 2 + (a->vocab[o] | a->vocab[o + 1] << 8);
     }
 
     // memory: weights, then a scratch arena sized to what is left (143360 bytes per encoder frame)
-    uint64_t next0 = e->next;
     uint64_t in_gpu = a->size;
     uint64_t room = e->mem_size - ((e->next + 255) & ~255ull);
     if (room < a->size + (256 << 10) + 400 * 143360ull) {
@@ -1500,12 +1443,12 @@ int asr_init(Engine* e, const char* dir, int model, int prompt) {
     }
     uint64_t free_bytes = e->mem_size - ((e->next + 255) & ~255ull);
     uint64_t small = 256 << 10;
-    if (free_bytes < in_gpu + small + 50 * 143360ull) goto fail;   // not even 4 s of audio
+    if (free_bytes < in_gpu + small + 50 * 143360ull) return -1;   // not even 4 s of audio
     uint64_t mf = (free_bytes - in_gpu - small) / 143360ull;
     a->max_frames = (uint32_t)(mf > 400 ? 400 : mf);
     if (in_gpu) a->model = gpu_alloc(e, a->size);
     int f = open(a->path, O_RDONLY);
-    if (f < 0) goto fail;
+    if (f < 0) return -1;
     uint64_t done = 0;
     while (done < a->size) {
         uint64_t n = a->size - done < (32ull << 20) ? a->size - done : 32ull << 20;
@@ -1514,7 +1457,7 @@ int asr_init(Engine* e, const char* dir, int model, int prompt) {
         done += r;
     }
     close(f);
-    if (done != a->size) goto fail;
+    if (done != a->size) return -1;
     a->mel = malloc(128 * 257 * 4);
     memcpy(a->mel, (void*)(uintptr_t)AW(e, "mel"), 128 * 257 * 4);
 
@@ -1524,18 +1467,7 @@ int asr_init(Engine* e, const char* dir, int model, int prompt) {
     a->sub_b = gpu_alloc(e, T2max * 32 * 256 * 4);      // pw1 out, then pw2 out
     a->mel_in = gpu_alloc(e, (8ull * MF + 16) * 128 * 4);
     a->pe = gpu_alloc(e, 2ull * MF * 1024 * 4);
-    if (!a->pe) goto fail;
     a->ws_begin = a->sub_a, a->ws_end = a->pe + 2ull * MF * 1024 * 4;
-    if (nm) {
-        // the same work memory, laid out for Nemotron: its subsampling maps have 33 frequency bins (Parakeet's 32),
-        // but it needs no positional rows (pe)
-        uint64_t sub = (2ull * MF * 33 * 256 * 4 + 255) & ~255ull;
-        a->sub_a = a->ws_begin;
-        a->sub_b = a->sub_a + sub;
-        a->mel_in = a->sub_b + sub;
-        a->pe = 0;
-        if (a->mel_in + (8ull * MF + 16) * 128 * 4 > a->ws_end) goto fail;
-    }
     uint64_t p = a->sub_a;
     a->x = p, p += MF * 1024 * 4;
     a->h = p, p += MF * 1024 * 4;
@@ -1553,24 +1485,12 @@ int asr_init(Engine* e, const char* dir, int model, int prompt) {
     a->gates = gpu_alloc(e, 2560 * 4);
     a->dec = gpu_alloc(e, 640 * 4);
     a->jin = gpu_alloc(e, 640 * 4);
-    a->logits = gpu_alloc(e, (nm ? 13120 : 8256) * 4);
+    a->logits = gpu_alloc(e, 8256 * 4);
     a->res = gpu_alloc(e, 256);
     a->dummy = gpu_alloc(e, 640 * 4);
-    if (!a->dummy) goto fail;
-    if (nm) {   // the prompt projector's bias for the language (the file has it in fp16 for each of the 128 prompts)
-        a->pbias = gpu_alloc(e, 2048 * 4);
-        const uint16_t* src = (const uint16_t*)(uintptr_t)AW(e, "prompt_b");
-        if (!a->pbias || !src) goto fail;
-        for (int i = 0; i < 2048; i++) ((float*)(uintptr_t)a->pbias)[i] = half_to_float(src[a->prompt * 2048 + i]);
-    }
+    if (!a->dummy) return -1;
     a->ready = 1;
     return 0;
-fail:   // give back what was taken
-    if (a->flex_len) sceKernelMunmap((void*)(uintptr_t)a->model, a->flex_len);
-    e->next = next0;
-    asr_free(a);
-    memset(a, 0, sizeof(*a));
-    return -1;
 }
 
 static void fft512(double* re, double* im) {   // in place, radix 2
@@ -1603,10 +1523,9 @@ static void fft512(double* re, double* im) {   // in place, radix 2
     }
 }
 
-// log-mel features as pc/parakeet_ref.py: features() -> out [T = n / 160][128]. Normalised per mel for Parakeet;
-// Nemotron takes them as they are (pc/nemotron_ref.py).
+// log-mel features as pc/parakeet_ref.py: features() -> out [T = n / 160][128]
 static int asr_features(Engine* e, const float* audio, int n, float* out) {
-    int T = n / 160, normalise = e->asr.kind == ASR_PARAKEET;
+    int T = n / 160;
     float* x = malloc((n + 512) * sizeof(float));
     double* mel = malloc((size_t)T * 128 * sizeof(double));
     if (!x || !mel) {
@@ -1629,34 +1548,25 @@ static int asr_features(Engine* e, const float* audio, int n, float* out) {
         }
     }
     for (int m = 0; m < 128; m++) {
-        double mean = 0.0, var = 0.0, sd = 1.0;
-        if (normalise) {
-            for (int t = 0; t < T; t++) mean += mel[t * 128 + m];
-            mean /= T;
-            for (int t = 0; t < T; t++) var += (mel[t * 128 + m] - mean) * (mel[t * 128 + m] - mean);
-            sd = sqrt(var / (T - 1)) + 1e-5;
-        }
+        double mean = 0.0, var = 0.0;
+        for (int t = 0; t < T; t++) mean += mel[t * 128 + m];
+        mean /= T;
+        for (int t = 0; t < T; t++) var += (mel[t * 128 + m] - mean) * (mel[t * 128 + m] - mean);
+        double sd = sqrt(var / (T - 1)) + 1e-5;
         for (int t = 0; t < T; t++) out[t * 128 + m] = (float)((mel[t * 128 + m] - mean) / sd);
     }
     free(x), free(mel);
     return 0;
 }
 
-// Y = act(W X + bias) for n rows of X (shaders/parakeet.cl mm_q4i). W is q4i, or q8i (8-bit weights in the same
-// tiles, shaders/nemotron.cl mm_q8i): a q8i tensor's scales start at rows x cols bytes, a q4i's at half that.
-static void amm_t(Engine* e, const AsrTensor* t, uint64_t X, uint64_t Y, uint32_t n, uint64_t bias, uint32_t act,
-                  double alpha, double beta) {
-    uint64_t w = e->asr.model + t->off;
-    int q8 = t->scales == (uint64_t)t->rows * t->cols;
-    dispatch(e, kernel(e, q8 ? "mm_q8i" : "mm_q4i"),
-             args(e, "pppppuuuuuuff", w, w + t->scales, bias, X, Y, t->cols, t->rows, n, t->cols, t->rows, act, alpha,
-                  beta),
-             t->rows / 64 * ((n + 7) / 8), 256);
-}
-
 static void amm(Engine* e, const char* key, uint64_t X, uint64_t Y, uint32_t n, const char* bias, uint32_t act,
                 double alpha, double beta) {
-    amm_t(e, at(e, key), X, Y, n, bias ? AW(e, bias) : (uint64_t)0, act, alpha, beta);
+    const AsrTensor* t = at(e, key);
+    uint64_t w = e->asr.model + t->off;
+    dispatch(e, kernel(e, "mm_q4i"),
+             args(e, "pppppuuuuuuff", w, w + t->scales, bias ? AW(e, bias) : (uint64_t)0, X, Y, t->cols, t->rows, n,
+                  t->cols, t->rows, act, alpha, beta),
+             t->rows / 64 * ((n + 7) / 8), 256);
 }
 
 static void ammf(Engine* e, const char* fmt, int i, uint64_t X, uint64_t Y, uint32_t n, uint32_t act, double alpha,
@@ -1678,16 +1588,37 @@ static void dec_update(Engine* e, uint32_t token) {
     amm(e, "dec_proj", a->xh1 + 640 * 4, a->dec, 1, "dec_proj_b", 0, 1.0, 0.0);
 }
 
-#define LN(nm, src, dst) dispatch(e, k_ln, args(e, "ppppu", src, AWf(e, "%d." nm ".w", i), AWf(e, "%d." nm ".b", i), \
-                                                 dst, 1024u), T, 256)
-
-// Parakeet's encoder: mels (mel_in) -> joint inputs (encp) [T][640]; pe holds the relative positions.
-static void asr_encoder_parakeet(Engine* e, uint32_t Tm, uint32_t T1, uint32_t T2, uint32_t T) {
+int asr_transcribe(Engine* e, const float* audio, int n, char* text, int max) {
     Asr* a = &e->asr;
-    uint32_t T3 = T;
+    text[0] = 0;
+    if (!a->ready) {
+        fail(e, "speech to text not loaded");
+        return -1;
+    }
+    int Tm = n / 160;
+    uint32_t T1 = (Tm - 1) / 2 + 1, T2 = (T1 - 1) / 2 + 1, T3 = (T2 - 1) / 2 + 1, T = T3;
+    if (Tm < 16 || T3 > a->max_frames) {
+        fail(e, "audio too short or too long (%d ms, max %u ms)", n / 16, a->max_frames * 80);
+        return -1;
+    }
+    if (asr_features(e, audio, n, (float*)(uintptr_t)a->mel_in)) {
+        fail(e, "out of memory for the audio features");
+        return -1;
+    }
+    float* pe = (float*)(uintptr_t)a->pe;   // relative positions T-1 .. -(T-1), interleaved sin / cos
+    for (uint32_t p = 0; p < 2 * T - 1; p++) {
+        float pos = (float)((int)T - 1 - (int)p);
+        for (int k = 0; k < 512; k++) {
+            float ang = pos * (float)pow(10000.0, -2.0 * k / 1024.0);
+            pe[p * 1024 + 2 * k] = sinf(ang);
+            pe[p * 1024 + 2 * k + 1] = cosf(ang);
+        }
+    }
+
+    begin(e);
     dispatch(e, kernel(e, "sub_conv1_dw1"),
              args(e, "ppppppuuu", a->mel_in, AW(e, "sub0_w"), AW(e, "sub0_b"), AW(e, "sub1_dw"), AW(e, "sub1_dwb"),
-                  a->sub_a, Tm, T1, T2),
+                  a->sub_a, (uint32_t)Tm, T1, T2),
              (T2 * 32 * 256 + 255) / 256, 256);
     dispatch(e, kernel(e, "mm_f32t"),
              args(e, "ppppuuuu", AW(e, "sub1_pwt"), AW(e, "sub1_pwb"), a->sub_a, a->sub_b, 256u, 256u, T2 * 32, 2u),
@@ -1701,6 +1632,8 @@ static void asr_encoder_parakeet(Engine* e, uint32_t Tm, uint32_t T1, uint32_t T
     amm(e, "sub_lin", a->sub_b, a->x, T, "sub_lin_b", 0, 1.0, 0.0);
     const GpuKernel* k_ln = kernel(e, "layernorm_rows");
     for (int i = 0; i < 24; i++) {
+#define LN(nm, src, dst) dispatch(e, k_ln, args(e, "ppppu", src, AWf(e, "%d." nm ".w", i), AWf(e, "%d." nm ".b", i), \
+                                                 dst, 1024u), T, 256)
         LN("norm_feed_forward1", a->x, a->h);
         ammf(e, "%d.feed_forward1.1", i, a->h, a->f, T, 1, 1.0, 0.0);
         ammf(e, "%d.feed_forward1.2", i, a->f, a->x, T, 0, 0.5, 1.0);
@@ -1721,98 +1654,9 @@ static void asr_encoder_parakeet(Engine* e, uint32_t Tm, uint32_t T1, uint32_t T
         ammf(e, "%d.feed_forward2.1", i, a->h, a->f, T, 1, 1.0, 0.0);
         ammf(e, "%d.feed_forward2.2", i, a->f, a->x, T, 0, 0.5, 1.0);
         LN("norm_out", a->x, a->x);
+#undef LN
     }
     amm(e, "enc_proj", a->x, a->encp, T, "enc_proj_b", 0, 1.0, 0.0);
-}
-
-// Nemotron's encoder (pc/nemotron_ref.py): causal subsampling, attention over chunks of 14 frames with each layer's
-// positional rows precomputed (%d.rel), causal conv module with a LayerNorm; then the language prompt,
-// relu(prompt_w x + pbias), and the fused linear_2 + encoder projector (out_w). The same buffers as Parakeet's.
-static void asr_encoder_nemotron(Engine* e, uint32_t Tm, uint32_t T1, uint32_t T2, uint32_t T) {
-    Asr* a = &e->asr;
-    dispatch(e, kernel(e, "nm_sub_conv1_dw1"),
-             args(e, "ppppppuuu", a->mel_in, AW(e, "sub0_w"), AW(e, "sub0_b"), AW(e, "sub1_dw"), AW(e, "sub1_dwb"),
-                  a->sub_a, Tm, T1, T2),
-             (T2 * 33 * 256 + 255) / 256, 256);
-    dispatch(e, kernel(e, "mm_f32t"),
-             args(e, "ppppuuuu", AW(e, "sub1_pwt"), AW(e, "sub1_pwb"), a->sub_a, a->sub_b, 256u, 256u, T2 * 33, 2u),
-             T2 * 33 * 4, 64);
-    dispatch(e, kernel(e, "nm_sub_dwconv"),
-             args(e, "ppppuu", a->sub_b, AW(e, "sub2_dw"), AW(e, "sub2_dwb"), a->sub_a, T2, T),
-             (T * 17 * 256 + 255) / 256, 256);
-    dispatch(e, kernel(e, "mm_f32t"),
-             args(e, "ppppuuuu", AW(e, "sub2_pwt"), AW(e, "sub2_pwb"), a->sub_a, a->sub_b, 256u, 256u, T * 17, 2u),
-             T * 17 * 4, 64);
-    amm(e, "sub_lin", a->sub_b, a->x, T, "sub_lin_b", 0, 1.0, 0.0);
-    const GpuKernel* k_ln = kernel(e, "layernorm_rows");
-    for (int i = 0; i < 24; i++) {
-        LN("norm_feed_forward1", a->x, a->h);
-        ammf(e, "%d.feed_forward1.1", i, a->h, a->f, T, 1, 1.0, 0.0);
-        ammf(e, "%d.feed_forward1.2", i, a->f, a->x, T, 0, 0.5, 1.0);
-        LN("norm_self_att", a->x, a->h);
-        ammf(e, "%d.wqkv", i, a->h, a->qkv, T, 0, 1.0, 0.0);
-        dispatch(e, kernel(e, "nm_attn"),
-                 args(e, "pppppu", a->qkv, AWf(e, "%d.rel", i), AWf(e, "%d.bias_u", i), AWf(e, "%d.bias_v", i), a->att,
-                      T),
-                 T * 8, 128);
-        ammf(e, "%d.wo", i, a->att, a->x, T, 0, 1.0, 1.0);
-        LN("norm_conv", a->x, a->h);
-        ammf(e, "%d.pw1", i, a->h, a->g2, T, 0, 1.0, 0.0);
-        dispatch(e, kernel(e, "glu_rows"), args(e, "ppu", a->g2, a->g, T), (T * 1024 + 255) / 256, 256);
-        dispatch(e, kernel(e, "nm_dwconv_ln_silu"),
-                 args(e, "ppppp", a->g, AWf(e, "%d.dw", i), AWf(e, "%d.cn.w", i), AWf(e, "%d.cn.b", i), a->h), T, 256);
-        ammf(e, "%d.pw2", i, a->h, a->x, T, 0, 1.0, 1.0);
-        LN("norm_feed_forward2", a->x, a->h);
-        ammf(e, "%d.feed_forward2.1", i, a->h, a->f, T, 1, 1.0, 0.0);
-        ammf(e, "%d.feed_forward2.2", i, a->f, a->x, T, 0, 0.5, 1.0);
-        LN("norm_out", a->x, a->x);
-    }
-    amm_t(e, at(e, "prompt_w"), a->x, a->f, T, a->pbias, 2, 1.0, 0.0);
-    amm(e, "out_w", a->f, a->encp, T, "out_b", 0, 1.0, 0.0);
-}
-
-#undef LN
-
-int asr_transcribe(Engine* e, const float* audio, int n, char* text, int max) {
-    Asr* a = &e->asr;
-    text[0] = 0;
-    if (!a->ready) {
-        fail(e, "speech to text not loaded");
-        return -1;
-    }
-    int nm = a->kind == ASR_NEMOTRON;
-    int Tm = n / 160;
-    uint32_t T1, T2, T3;
-    if (nm)   // causal convs: n valid frames in, n / 2 + 1 out (nemotron_ref.py sub_len)
-        T1 = Tm / 2 + 1, T2 = T1 / 2 + 1, T3 = T2 / 2 + 1;
-    else
-        T1 = (Tm - 1) / 2 + 1, T2 = (T1 - 1) / 2 + 1, T3 = (T2 - 1) / 2 + 1;
-    uint32_t T = T3;
-    if (Tm < 16 || T3 > a->max_frames) {
-        fail(e, "audio too short or too long (%d ms, max %u ms)", n / 16, a->max_frames * 80);
-        return -1;
-    }
-    if (asr_features(e, audio, n, (float*)(uintptr_t)a->mel_in)) {
-        fail(e, "out of memory for the audio features");
-        return -1;
-    }
-    if (!nm) {
-        float* pe = (float*)(uintptr_t)a->pe;   // relative positions T-1 .. -(T-1), interleaved sin / cos
-        for (uint32_t p = 0; p < 2 * T - 1; p++) {
-            float pos = (float)((int)T - 1 - (int)p);
-            for (int k = 0; k < 512; k++) {
-                float ang = pos * (float)pow(10000.0, -2.0 * k / 1024.0);
-                pe[p * 1024 + 2 * k] = sinf(ang);
-                pe[p * 1024 + 2 * k + 1] = cosf(ang);
-            }
-        }
-    }
-
-    begin(e);
-    if (nm)
-        asr_encoder_nemotron(e, (uint32_t)Tm, T1, T2, T);
-    else
-        asr_encoder_parakeet(e, (uint32_t)Tm, T1, T2, T);
     if (submit(e)) return -1;
     double gpu = e->last_gpu_seconds;
 
@@ -1821,28 +1665,26 @@ int asr_transcribe(Engine* e, const float* audio, int n, char* text, int max) {
     memset((void*)(uintptr_t)a->c0, 0, 640 * 4);
     memset((void*)(uintptr_t)a->c1, 0, 640 * 4);
     int len = 0, at_frame = 0, steps = 0, update = 1;
-    uint32_t token = a->blank, t = 0;
+    uint32_t token = 8192, t = 0;
     while (t < T && steps < 10 * (int)T) {
         begin(e);
         if (update) dec_update(e, token);
         dispatch(e, kernel(e, "joint_in"), args(e, "pppu", a->encp, a->dec, a->jin, t), 10, 64);
         amm(e, "joint", a->jin, a->logits, 1, "joint_b", 0, 1.0, 0.0);
-        dispatch(e, kernel(e, "argmax_tdt"), args(e, "ppuu", a->logits, a->res, a->n_vocab, a->n_dur), 1, 256);
+        dispatch(e, kernel(e, "argmax_tdt"), args(e, "ppuu", a->logits, a->res, 8193u, 5u), 1, 256);
         if (submit(e)) return -1;
         gpu += e->last_gpu_seconds;
         steps++;
         volatile uint32_t* res = (volatile uint32_t*)(uintptr_t)a->res;
-        uint32_t tok = res[0], dur = res[1];   // (dur is always 0 for Nemotron: a token stays on its frame)
-        update = tok != a->blank;
+        uint32_t tok = res[0], dur = res[1];
+        update = tok != 8192;
         if (update) {
             token = tok;
-            if (tok < a->n_pieces) {
-                const uint8_t* p = a->vocab + a->piece[tok];
-                int l = p[0] | p[1] << 8;
-                if (len + l < max - 1) {
-                    memcpy(text + len, p + 2, l);
-                    len += l;
-                }
+            const uint8_t* p = a->vocab + a->piece[tok];
+            int l = p[0] | p[1] << 8;
+            if (len + l < max - 1) {
+                memcpy(text + len, p + 2, l);
+                len += l;
             }
             at_frame++;
         }
@@ -1913,7 +1755,7 @@ int engine_flex_test(Engine* e) {
     return 0;
 }
 
-// The dictation weights in system memory (the 9B) are released while Python runs, and come back after (see engine.h).
+// Parakeet's weights in system memory (the 9B) are released while Python runs, and come back after (see engine.h).
 // With the weights in GPU memory (the 4B, flex_len 0): nothing to do.
 // The memory itself stays mapped: Python borrows it (asr_lent: its heap and its thread's stack) and the weights are
 // read back into it afterwards. Given back to the system, it would have to be mapped again, and the 338 MiB might no

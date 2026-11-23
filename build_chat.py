@@ -24,17 +24,12 @@ if "--4b" in sys.argv:
     TITLE, VERSION, TITLE_ID, SUFFIX = "Garlic LLM 4B", "1.17", "PSAI00002", "02"
     REMOTE = "/data/pkg/Garlic-LLM-4B.pkg"
 else:
-    TITLE, VERSION, TITLE_ID, SUFFIX = "Garlic LLM", "1.21", "PSAI00001", "01"
+    TITLE, VERSION, TITLE_ID, SUFFIX = "Garlic LLM", "1.20", "PSAI00001", "01"
     REMOTE = "/data/pkg/Garlic-LLM.pkg"
 FULL = "--full" in sys.argv
 # the weights of the all-in-one package (the names the .idx files give, see weights_locate)
-FULL_MODELS = (["qwen3.5-4b-q4i.bin"] if "--4b" in sys.argv else ["qwen3.5-9b-q4s.bin", "qwen3.5-9b-mtp.bin"]) +     ["parakeet-v3-q4i.bin", "nemotron-3.5-asr-q4i.bin", "chatterbox-t3.bin", "chatterbox-s3gen-mf.bin"]
+FULL_MODELS = (["qwen3.5-4b-q4i.bin"] if "--4b" in sys.argv else ["qwen3.5-9b-q4s.bin", "qwen3.5-9b-mtp.bin"]) +     ["parakeet-v3-q4i.bin", "chatterbox-t3.bin", "chatterbox-s3gen-mf.bin"]
 CONTENT_ID = f"IV0000-{TITLE_ID}_00-PS4LOCALAICHAT{SUFFIX}"
-# BODY_NOTE: PkgTool sizes the PlayGo chunk hashes (4 bytes per 64 KiB of package) before it rounds the package body
-# (icon0.png, pic1.png, param.sfo and the PKG's own tables, about 153 KB) up to 512 KiB. When body and hashes together
-# cross that 512 KiB line, pkg_build stops with "Playgo Chunk hash file was not allocated enough space". With these
-# images that happens for packages of about 6.1 to 8.6 GB; the 1.21 all-in-one package is 6.0 GB. Keep the two images
-# small (pc/make_brand.py saves them optimized), and check this limit when the models in FULL_MODELS change.
 SOURCES = sorted((ROOT / "chat").glob("*.c"))
 MP = ROOT / "chat" / "py" / "mp"
 MP_SOURCES = sorted([*(MP / "py").glob("*.c"), *(MP / "extmod").glob("*.c"), *(MP / "shared" / "runtime").glob("*.c"),

@@ -13,14 +13,6 @@ Per layer the same tensors as the 4B file (wgu fmt "q3i").
 Run from pc/:
   python -m modal run modal_qwen35_9b.py::convert
   python -m modal run modal_qwen35_9b.py::reference --prompt "..." --n 30
-
-Another model with Qwen3.5-9B's shapes (a fine-tune of it), from a public Hugging Face repository:
-  python -m modal run modal_qwen35_9b.py::convert --src <owner>/<model> [--name <name>]
-The checkpoint is checked on this PC first (pc/checkpoint.py: Qwen3.5-9B's configuration, tensor names and shapes,
-sharded safetensors with model.safetensors.index.json), so a model that cannot convert stops before Modal runs.
-The result stays in the Modal volume garlic-hf-cache as out/<name>-mix.bin and .json (<name>: qwen3.5-9b for
-Qwen/Qwen3.5-9B, else the repository's name); the command prints how to download it for pc/convert_9b_q4s.py, which
-makes the folder the app loads. --src and --name also work with ::reference.
 """
 
 from pathlib import Path
@@ -28,20 +20,9 @@ from pathlib import Path
 import modal
 
 HERE = Path(__file__).resolve().parent
-STOCK = "Qwen/Qwen3.5-9B"
-
-
-def default_name(src):
-    """qwen3.5-9b for Qwen/Qwen3.5-9B, else the repository's name (owner/name@revision -> name)."""
-    return "qwen3.5-9b" if src == STOCK else src.split("@")[0].rstrip("/").split("/")[-1]
-
-
-def split_src(src):
-    repo, _, rev = src.partition("@")
-    return repo, rev or None
-
-
-image =(modal.Image.debian_slim(python_version="3.11")
+REPO = "Qwen/Qwen3.5-9B"
+NAME = "qwen3.5-9b-mix"
+image = (modal.Image.debian_slim(python_version="3.11")
          .pip_install("torch==2.6.0", "transformers==5.20.1", "safetensors", "numpy>=2", "huggingface_hub",
                       "accelerate", "jinja2")
          .env({"HF_HOME": "/cache/huggingface"})
@@ -52,8 +33,7 @@ app = modal.App("ps4-qwen35-9b", image=image)
 
 
 @app.function(cpu=16, memory=65536, timeout=7200, volumes={"/cache": cache})
-def convert_remote(src: str = STOCK, prefix: str = "model.language_model.", name: str = "qwen3.5-9b"):
-    """src checked by pc/checkpoint.py on the PC; prefix: where its text model's tensors are (as check found)."""
+def convert_remote():
     import json
     import sys
     import numpy as np
@@ -63,13 +43,9 @@ def convert_remote(src: str = STOCK, prefix: str = "model.language_model.", name
     from q3 import interleave_q3, quantize_q3
     from q4 import interleave_q4, quantize_q4
 
-    repo, rev = split_src(src)
-    d = Path(snapshot_download(repo, revision=rev,
-                               allow_patterns=["*.json", "*.safetensors", "*.jinja", "merges.txt"]))
-    cfg = json.loads((d / "config.json").read_text())
-    cfg = cfg.get("text_config", cfg)
+    d = Path(snapshot_download(REPO, allow_patterns=["*.json", "*.safetensors", "*.jinja", "merges.txt"]))
+    cfg = json.loads((d / "config.json").read_text())["text_config"]
     wmap = json.loads((d / "model.safetensors.index.json").read_text())["weight_map"]
-    NAME = f"{name}-mix"
     files = {}
 
     def get(name):
@@ -105,7 +81,7 @@ def convert_remote(src: str = STOCK, prefix: str = "model.language_model.", name
         words, sc = interleave_q3(q, d16)
         put(key, words + sc, rows=mat.shape[0], cols=mat.shape[1], scales=len(words), fmt="q3i")
 
-    P = prefix
+    P = "model.language_model."
     put_f32("final_norm", 1.0 + get(P + "norm.weight"))
     nh, hd = cfg["num_attention_heads"], cfg["head_dim"]
     for i, kind in enumerate(cfg["layer_types"]):
@@ -149,7 +125,7 @@ def convert_remote(src: str = STOCK, prefix: str = "model.language_model.", name
                           rowbytes=rowbytes, fmt="q4row")
     out.close()
     (out_path / f"{NAME}.json").write_text(json.dumps(dict(config=cfg, size=offset, gpu_size=gpu_size,
-                                                           tensors=index, checkpoint=src), indent=1))
+                                                           tensors=index), indent=1))
     cache.commit()
     return gpu_size, offset
 
@@ -181,11 +157,10 @@ def quantized_like_ps4(model):
 
 
 @app.function(gpu=["A100-80GB", "H100"], timeout=3600, volumes={"/cache": cache})
-def reference_remote(ids: list, n_new: int, src: str = STOCK) -> dict:
+def reference_remote(ids: list, n_new: int) -> dict:
     import torch
     from transformers import AutoModelForCausalLM
-    repo, rev = split_src(src)
-    model = AutoModelForCausalLM.from_pretrained(repo, revision=rev, dtype=torch.float32).eval()
+    model = AutoModelForCausalLM.from_pretrained(REPO, dtype=torch.float32).eval()
     quantized_like_ps4(model)
     model = model.to("cuda")
     with torch.no_grad():
@@ -196,48 +171,25 @@ def reference_remote(ids: list, n_new: int, src: str = STOCK) -> dict:
 
 
 @app.function(timeout=600, volumes={"/cache": cache})
-def chat_ids(messages: list, thinking: bool = False, src: str = STOCK) -> list:
+def chat_ids(messages: list, thinking: bool = False) -> list:
     from transformers import AutoTokenizer
-    repo, rev = split_src(src)
-    tok = AutoTokenizer.from_pretrained(repo, revision=rev)
+    tok = AutoTokenizer.from_pretrained(REPO)
     r = tok.apply_chat_template(messages, add_generation_prompt=True, enable_thinking=thinking, tokenize=True)
     r = r["input_ids"] if hasattr(r, "keys") else r
     return [int(v) for v in (r[0] if r and isinstance(r[0], list) else r)]
 
 
-def checked(src):
-    """pc/checkpoint.py's check, on this PC: where the text model's tensors are, or the program ends saying what
-    differs from Qwen3.5-9B."""
-    import sys
-    sys.path.insert(0, str(HERE))
-    from checkpoint import Checkpoint, CheckpointError, check
-    try:
-        ck = Checkpoint(src)
-        check(ck)
-    except CheckpointError as e:
-        sys.exit(str(e))
-    return ck.prefix
+@app.local_entrypoint()
+def convert():
+    gpu_size, total = convert_remote.remote()
+    print(f"converted: GPU part {gpu_size / 2**20:.1f} MiB, file {total / 2**20:.1f} MiB (/out/{NAME}.bin)")
 
 
 @app.local_entrypoint()
-def convert(src: str = STOCK, name: str = ""):
-    name = name or default_name(src)
-    prefix = checked(src)
-    print(f"{src}: Qwen3.5-9B's shapes; converting into out/{name}-mix.bin on Modal", flush=True)
-    gpu_size, total = convert_remote.remote(src, prefix, name)
-    print(f"converted: GPU part {gpu_size / 2**20:.1f} MiB, file {total / 2**20:.1f} MiB (out/{name}-mix.bin)")
-    models = HERE.parent / "models"
-    models.mkdir(exist_ok=True)
-    print(f'Download it for convert_9b_q4s.py:\n  modal volume get garlic-hf-cache out/{name}-mix.bin "{models}"\n'
-          f'  modal volume get garlic-hf-cache out/{name}-mix.json "{models}"')
-
-
-@app.local_entrypoint()
-def reference(prompt: str = "¿Quién es Paolo Guerrero y dónde nació?", n: int = 30, src: str = STOCK, name: str = ""):
+def reference(prompt: str = "¿Quién es Paolo Guerrero y dónde nació?", n: int = 30):
     import numpy as np
-    name = name or default_name(src)
-    ids = chat_ids.remote([{"role": "user", "content": prompt}], False, src)
-    r = reference_remote.remote(ids, n, src)
-    np.savez(HERE.parent / "build" / f"ref_{name}-mix.npz", ids=np.array(ids),
+    ids = chat_ids.remote([{"role": "user", "content": prompt}])
+    r = reference_remote.remote(ids, n)
+    np.savez(HERE.parent / "build" / f"ref_{NAME}.npz", ids=np.array(ids),
              logits=np.frombuffer(r["logits"], np.float32), out=np.array(r["out"]))
     print("prompt", len(ids), "tokens ->", r["out"])

@@ -22,78 +22,14 @@ static uint32_t cp_at(const char* s, int* len) {
 }
 
 // ---- where the next piece to speak ends ----
-// A piece ends after . ! ? … (and any closing quotes / brackets) followed by white space, after 。！？ (no space
-// needed) or the Arabic ؟, at a line break, or at the end of a code block's opening fence. Pieces longer than
-// SOFT_MAX bytes end at the next comma, colon or semicolon (also 、 and the Arabic ، ؛); longer than HARD_MAX at the
-// next space, or in Japanese after a hiragana (a piece is spoken in at most ~12 s: T3 stops at 300 tokens).
+// A piece ends after . ! ? … (and any closing quotes / brackets) followed by white space, at a line break, or at
+// the end of a code block's opening fence. Pieces longer than SOFT_MAX bytes end at the next comma, colon or
+// semicolon; longer than HARD_MAX at the next space (a piece is spoken in at most ~12 s: T3 stops at 300 tokens).
 // Lengths count each digit as 7 bytes, as st_speak says numbers in words ("753" -> "setecientos cincuenta y tres"),
 // so a piece with dates in it stays within T3's limit.
 #define SOFT_MAX 100
 #define HARD_MAX 160
 #define DIGIT_EXTRA 6
-
-// The kind of the character at p (n bytes left): 1 hiragana, 2 katakana, 3 kanji (and 々〆〇), 4 Japanese
-// punctuation (、。「」『』 and full-width forms), 0 anything else
-static int cjk_kind(const char* p, int n) {
-    if (n < 3 || ((uint8_t)p[0] & 0xF0) != 0xE0) return 0;
-    int l;
-    uint32_t c = cp_at(p, &l);
-    if (c >= 0x3041 && c <= 0x309F) return 1;
-    if ((c >= 0x30A0 && c <= 0x30FF) || (c >= 0x31F0 && c <= 0x31FF) || (c >= 0xFF66 && c <= 0xFF9F)) return 2;
-    if ((c >= 0x3400 && c <= 0x9FFF) || (c >= 0xF900 && c <= 0xFAFF) || (c >= 0x3005 && c <= 0x3007)) return 3;
-    if ((c >= 0x3001 && c <= 0x3003) || (c >= 0x3008 && c <= 0x301F) || (c >= 0xFF01 && c <= 0xFF65)) return 4;
-    return 0;
-}
-
-// A sentence end that needs no space: 。！？ (Japanese), and ؟ (Arabic, before a space). Returns the end of the
-// piece (after closing brackets and one space or line break), or 0.
-static int uni_end(const char* text, int len, int i) {
-    const uint8_t* t = (const uint8_t*)text;
-    int j;
-    if (i + 2 < len && ((t[i] == 0xE3 && t[i + 1] == 0x80 && t[i + 2] == 0x82) ||
-                        (t[i] == 0xEF && t[i + 1] == 0xBC && (t[i + 2] == 0x81 || t[i + 2] == 0x9F)))) {
-        j = i + 3;
-        int quote = 0;
-        for (;;) {   // closing brackets and more marks: 」』）！？。 . ! ? " ' ) ]
-            if (j < len && strchr(".!?\"')]*", text[j])) quote |= text[j] == '"' || text[j] == ')', j++;
-            else if (j + 2 < len && ((t[j] == 0xE3 && t[j + 1] == 0x80 && (t[j + 2] == 0x8D || t[j + 2] == 0x8F ||
-                                                                         t[j + 2] == 0x82)) ||
-                                     (t[j] == 0xEF && t[j + 1] == 0xBC &&
-                                      (t[j + 2] == 0x89 || t[j + 2] == 0x81 || t[j + 2] == 0x9F))))
-                quote |= t[j + 2] == 0x8D || t[j + 2] == 0x8F || t[j + 2] == 0x89, j += 3;
-            else break;
-        }
-        if (quote && cjk_kind(text + j, len - j) == 1) return 0;   // 「すごい！」と言った: the sentence goes on
-        if (j < len && (text[j] == ' ' || text[j] == '\n')) j++;
-        return j;
-    }
-    if (i + 1 < len && t[i] == 0xD8 && t[i + 1] == 0x9F) {   // ؟
-        j = i + 2;
-        while (j < len && strchr(".!?\"')]*", text[j])) j++;
-        if (j >= len) return len;
-        return text[j] == ' ' || text[j] == '\n' ? j + 1 : 0;
-    }
-    return 0;
-}
-
-// A comma that needs no space after it: 、，：； (Japanese); ، ؛ (Arabic) before a space. Returns the byte after it
-// (and after a space), or 0.
-static int uni_comma(const char* text, int len, int i) {
-    const uint8_t* t = (const uint8_t*)text;
-    int j = 0;
-    if (i + 2 < len && ((t[i] == 0xE3 && t[i + 1] == 0x80 && t[i + 2] == 0x81) ||
-                        (t[i] == 0xEF && t[i + 1] == 0xBC && (t[i + 2] == 0x8C || t[i + 2] == 0x9A || t[i + 2] == 0x9B))))
-        j = i + 3;
-    else if (i + 2 < len && t[i] == 0xD8 && (t[i + 1] == 0x8C || t[i + 1] == 0x9B) && text[i + 2] == ' ')
-        j = i + 2;
-    if (j && j < len && text[j] == ' ') j++;
-    return j;
-}
-
-int st_comma_end(const char* text, int len, int i) {
-    if (i + 1 < len && text[i] == ',' && text[i + 1] == ' ') return i + 2;
-    return uni_comma(text, len, i);
-}
 
 // Is the period at text[i] (a space follows) part of an abbreviation or a German ordinal rather than a sentence end?
 // "p. ej.", "н. э.", "v. Chr. gegründet", "753 a.C. y", "av. J.-C.", "Dr. López", "am 1. Mai", "3. lugar"
@@ -184,45 +120,14 @@ int st_next_piece(const char* text, int len, int from, int final) {
                 if (final) return len;
                 return -1;   // the next token decides
             }
-            // Japanese: "!" or "?" with no space before the next sentence ("ありがとう!また明日。")
-            if (c != '.' && cjk_kind(text + j, len - j) && cjk_kind(text + j, len - j) != 4) return j;
-        }
-        int u = uni_end(text, len, i);   // 。！？ (Japanese, no space after them) and ؟ (Arabic): a sentence ends
-        if (u > 0) {
-            if (u >= len && !final) return -1;   // (a closing bracket may follow)
-            return u;
         }
         if (n >= SOFT_MAX && (c == ',' || c == ';' || c == ':') && i + 1 < len && text[i + 1] == ' ') return i + 2;
-        if (n >= SOFT_MAX && (u = uni_comma(text, len, i)) > 0) return u;   // 、 and the Arabic ، ؛
         if (n >= HARD_MAX && c == ' ') return i + 1;
-        // Japanese has no spaces: past HARD_MAX, between a hiragana and the kanji or katakana after it (a word with
-        // its particle ends there: "東京では | 毎日"), and past HARD_MAX + 60 between any two characters
-        if (n >= HARD_MAX && !is_cont((uint8_t)c) && i > from) {
-            int p = i - 1;
-            while (p > from && is_cont((uint8_t)text[p])) p--;
-            int kp = cjk_kind(text + p, i - p), kc = cjk_kind(text + i, len - i);
-            if (kp && kc && ((kp == 1 && kc != 1 && kc != 4) || n >= HARD_MAX + 60)) return i;
-        }
     }
     return final && len > from ? len : -1;
 }
 
 // ---- text to read aloud ----
-// Japanese characters st_clean keeps above U+218F: kana, kanji, half-width kana and the punctuation 、。〃々〆〇「」『』〜
-static int cjk_kept(uint32_t c) {
-    return (c >= 0x3001 && c <= 0x3007) || (c >= 0x300C && c <= 0x300F) || c == 0x301C || (c >= 0x3041 && c <= 0x30FF) ||
-           (c >= 0x31F0 && c <= 0x31FF) || (c >= 0x3400 && c <= 0x4DBF) || (c >= 0x4E00 && c <= 0x9FFF) ||
-           (c >= 0xF900 && c <= 0xFAFF) || (c >= 0xFF61 && c <= 0xFF9F);
-}
-
-// out[0, k) ends with a punctuation mark (also 。、 and the Arabic ، ؛ ؟)
-static int ends_in_punct(const char* out, int k) {
-    if (k > 0 && strchr(".!?,;:", out[k - 1])) return 1;
-    const uint8_t* e = (const uint8_t*)out + k;
-    if (k >= 3 && e[-3] == 0xE3 && e[-2] == 0x80 && (e[-1] == 0x81 || e[-1] == 0x82)) return 1;   // 、。
-    return k >= 2 && e[-2] == 0xD8 && (e[-1] == 0x8C || e[-1] == 0x9B || e[-1] == 0x9F);           // ، ؛ ؟
-}
-
 // Drops markdown marks (* _ # ` > | and list bullets), code blocks, links' URLs, emoji and other symbols; keeps
 // letters, digits and punctuation. Returns the length of out (0 = nothing to say).
 int st_clean(const char* in, int n, char* out, int max) {
@@ -255,25 +160,18 @@ int st_clean(const char* in, int n, char* out, int max) {
             // a line without final punctuation (a title, a list item): a pause
             int k = o;
             while (k > 0 && out[k - 1] == ' ') k--;
-            if (k > 0 && !ends_in_punct(out, k)) out[k++] = ',';
+            if (k > 0 && !strchr(".!?,;:", out[k - 1])) out[k++] = ',';
             o = k;
             if (o && out[o - 1] != ' ') out[o++] = ' ';
             i += l;
             continue;
         }
-        // full-width Latin letters, digits and punctuation (Japanese text) as their ASCII forms, the ideographic
-        // space as a space: st_speak and the piece ends see "１２３", "！" and "：" as 123, ! and :
-        const char* src = in + i;
-        char asc = 0;
-        int l2 = l;
-        if (c >= 0xFF01 && c <= 0xFF5E) c -= 0xFEE0, asc = (char)c, src = &asc, l2 = 1;
-        else if (c == 0x3000) c = ' ', asc = ' ', src = &asc, l2 = 1;
         int keep = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c >= 0xC0 ||
                    strchr(" .,!?;:'\"()-%&+=/$", (int)c) != NULL || c == 0xA1 || c == 0xBF || c == 0xAB || c == 0xBB ||
                    c == 0xB0 || c == 0xBA || c == 0xAA || c == 0xA3;   // ° º ª £ (st_speak reads them)
         if (c >= 0x2000 && c < 0x2070) keep = c == 0x2026 || c == 0x2014 || c == 0x2013 || (c >= 0x2018 && c <= 0x201D);
-        if (c >= 0x2190) keep = cjk_kept(c);   // arrows, symbols, emoji... (but Japanese text and its punctuation)
-        if (c == '\t') c = ' ', keep = 1, l2 = 1, src = " ";
+        if (c >= 0x2190) keep = 0;   // arrows, symbols, emoji, ...
+        if (c == '\t') c = ' ', keep = 1, l = 1;
         if (c == '*' || c == '_' || c == '#' || c == '`' || c == '|' || c == '~' || c == '<' || c == '>') keep = 0;
         if (keep) {
             if (c == ' ' && (o == 0 || out[o - 1] == ' ')) {
@@ -281,8 +179,8 @@ int st_clean(const char* in, int n, char* out, int max) {
                 continue;
             }
             if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c >= 0xC0) words++;
-            memcpy(out + o, src, l2);
-            o += l2;
+            memcpy(out + o, in + i, l);
+            o += l;
         }
         i += l;
     }
@@ -293,7 +191,7 @@ int st_clean(const char* in, int n, char* out, int max) {
 
 // ---- language of a piece ----
 // Naive Bayes over hashed character 1-4-grams of each word (chat/lang_id_table.h, trained on Wikipedia)
-// for es, pt, en, fr, de, it; Russian, Greek, Arabic and Japanese by their script. The fallback (the
+// for es, pt, en, fr, de, it; Russian and Greek by their script. The fallback (the
 // reply's language, or the user's for the reply) is kept unless another language explains the text better by more
 // than LID_MARGIN nats, or by more than LID_SHORT nats and LID_RATIO nats per n-gram (short but clear: "Oi, tudo
 // bem?", "Bonjour"). The margins let a whole sentence in another language change the language, while short
@@ -341,15 +239,8 @@ static int lid_word(const char* b, const int* st, int nc, uint32_t* cost) {   //
     return count;
 }
 
-static char console_lang[4] = "en";
-void st_console_lang(const char* lang) {
-    strncpy(console_lang, lang, 3);
-    console_lang[3] = 0;
-}
-
 const char* st_lang(const char* s, const char* fallback) {
     int cyr = 0, greek = 0, latin = 0, words = 0, in_code = 0, in_tick = 0, grams = 0, marks = 0;
-    int arabic = 0, kana = 0, kanji = 0;
     uint32_t cost[LID_NLANG] = {0};   // in 1/8 nats
     char b[200];
     int st[64], nc = 0, bl = 1;
@@ -364,15 +255,6 @@ const char* st_lang(const char* s, const char* fallback) {
         uint32_t c = s[i] ? cp_at(s + i, &l) : 0;
         int skip = in_code || in_tick;
         if (!skip && (c == 0xBF || c == 0xA1)) marks++;   // ¿ ¡
-        if (!skip && c >= 0x600) {   // Arabic letters, kana, kanji: counted by their script
-            if ((c >= 0x620 && c <= 0x64A) || (c >= 0x671 && c <= 0x6D3) || (c >= 0xFB50 && c <= 0xFDFF) ||
-                (c >= 0xFE70 && c <= 0xFEFC))
-                arabic++;
-            else if ((c >= 0x3041 && c <= 0x30FF && c != 0x30FB) || (c >= 0x31F0 && c <= 0x31FF) || (c >= 0xFF66 && c <= 0xFF9D))
-                kana++;
-            else if ((c >= 0x3400 && c <= 0x4DBF) || (c >= 0x4E00 && c <= 0x9FFF) || (c >= 0xF900 && c <= 0xFAFF))
-                kanji++;
-        }
         int is_l = !skip && letter_cp(c);
         int apos = !skip && c == '\'' && nc > 0 && letter_cp(s[i + 1] ? (uint8_t)s[i + 1] : 0);
         if ((is_l || apos) && nc < 60 && bl < (int)sizeof(b) - 8) {
@@ -394,14 +276,6 @@ const char* st_lang(const char* s, const char* fallback) {
     }
     if (cyr > latin) return "ru";
     if (greek > latin) return "el";
-    // Arabic and Japanese by their letters against the Latin ones, more easily if the reply is already in that
-    // language: an Arabic reply with "Garlic LLM" in it stays Arabic, an English sentence with one Arabic or Japanese
-    // word in it stays English. A kana or a kanji counts as two Latin letters ("Garlic LLM は PS4 で動きます").
-    int ar_fb = !strcmp(fallback, "ar"), ja_fb = !strcmp(fallback, "ja"), cjk = 2 * (kana + kanji);
-    if (arabic && (ar_fb ? 2 * arabic > latin : arabic > latin)) return "ar";
-    if (kana && (ja_fb ? 2 * cjk > latin : 2 * cjk > 3 * latin)) return "ja";
-    // kanji alone (Chinese and Japanese share them): Japanese if the console is in Japanese, else the reply's language
-    if (kanji && (ja_fb ? 2 * cjk > latin : 2 * cjk > 3 * latin)) return !strcmp(console_lang, "ja") ? "ja" : fallback;
     if (!words) return fallback;
     float c[LID_NLANG];
     int best = 0, fb = -1;
@@ -439,8 +313,7 @@ static const char st_no_end[] =   // words that cannot end a piece: articles, pr
     " that le les une des du d l au aux dans par pour sur avec sans et ou mais son sa ses mon ma mes ce cette est"
     " der die das den dem ein eine einen einem einer und oder aber im an am auf mit von zu zum zur für ist sind"
     " il gli i di della dei degli delle alla ai nel nella su sul ma è"
-    " и в во на с со к ко по о об от до из за для у не что как это его её их мой твой а но или"
-    " في من إلى على عن مع هذا هذه ذلك تلك أن إن التي الذي الذين كان كانت قد لا ما لم لن هو هي و أو ثم بين عند ";
+    " и в во на с со к ко по о об от до из за для у не что как это его её их мой твой а но или ";
 static const char st_openers[] =   // words that open a new phrase: a cut can come before them
     " que y o pero porque cuando donde como mientras aunque si pues para con sin en"
     " e ou mas quando onde enquanto embora se com sem em"
@@ -448,8 +321,7 @@ static const char st_openers[] =   // words that open a new phrase: a cut can co
     " qui et parce quand où comme pendant bien pour avec sans dans"
     " dass und oder aber weil wenn wo wie während obwohl ob um mit ohne"
     " che ma perché dove mentre anche per senza"
-    " что и или но потому когда где как пока хотя если чтобы с без в"
-    " لأن عندما لكن حيث التي الذي الذين أن أو ثم بينما إذا حتى كي مع بدون في ";
+    " что и или но потому когда где как пока хотя если чтобы с без в ";
 
 static int word_char(uint8_t c) {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c >= 0x80 || c == '-' ||
@@ -507,24 +379,6 @@ int st_natural_cut(const char* text, int len, int from, int lo, int hi) { return
 int st_opener_cut(const char* text, int len, int from, int lo, int hi) { return natural_cut(text, len, from, lo, hi, 1); }
 
 int st_speech_tokens(const char* w, int n, const char* lang) {
-    // Japanese and Arabic: a weight per kind of character, fitted on T3's speech tokens for 25 sentences per
-    // language (numbers, dates, English words): kana, kanji (read as two or three kana), Arabic letters (harakat
-    // add nothing), digits (read as words), Latin letters. Off by about 7 % (ja) and 12 % (ar) per sentence.
-    int ja = !strcmp(lang, "ja");
-    if (ja || !strcmp(lang, "ar")) {
-        float t = 20.0f;
-        for (int i = 0; i < n;) {
-            int l;
-            uint32_t c = cp_at(w + i, &l);
-            if (c >= '0' && c <= '9') t += ja ? 6.3f : 12.5f;
-            else if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) t += ja ? 4.4f : 3.0f;
-            else if (c >= 0x3041 && c <= 0x30FF) t += 2.6f;
-            else if ((c >= 0x4E00 && c <= 0x9FFF) || (c >= 0x3400 && c <= 0x4DBF)) t += 5.2f;
-            else if ((c >= 0x620 && c <= 0x64A) || (c >= 0x671 && c <= 0x6D3)) t += 2.5f;
-            i += l;
-        }
-        return (int)t;
-    }
     static const char* const l[] = {"es", "ru", "it", "pt", "fr", "de", "en"};
     static const float k[] = {1.77f, 1.46f, 1.55f, 1.80f, 1.15f, 1.30f, 1.25f};
     float r = 1.6f;

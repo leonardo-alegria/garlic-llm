@@ -146,68 +146,45 @@ static const Font* pick_font(float px, int bold, float* scale) {
     return f;
 }
 
-static void blit_scaled(const Glyph* g, float gx, float gy, uint32_t rgb, float scale) {
-    int W = (int)ceilf(g->w * scale), H = (int)ceilf(g->h * scale);
-    for (int j = 0; j < H; j++) {
-        int py = (int)gy + j;
-        if (py < clip_y0 || py >= clip_y1) continue;
-        float v = (j + 0.5f) / scale - 0.5f;
-        int v0 = (int)floorf(v);
-        float fv = v - v0;
-        for (int i = 0; i < W; i++) {
-            int px = (int)gx + i;
-            if (px < clip_x0 || px >= clip_x1) continue;
-            float u = (i + 0.5f) / scale - 0.5f;
-            int u0 = (int)floorf(u);
-            float fu = u - u0;
-            float r = 0, gg = 0, b = 0, a = 0;
-            for (int k = 0; k < 4; k++) {
-                int uu = u0 + (k & 1), vv = v0 + (k >> 1);
-                if (uu < 0 || vv < 0 || uu >= g->w || vv >= g->h) continue;
-                float wgt = ((k & 1) ? fu : 1 - fu) * ((k >> 1) ? fv : 1 - fv);
-                if (g->kind == 1) {
-                    const uint8_t* c = g->bm + (vv * g->w + uu) * 4;
-                    r += c[0] * wgt * c[3], gg += c[1] * wgt * c[3], b += c[2] * wgt * c[3], a += c[3] * wgt;
-                } else a += glyph_alpha(g, vv * g->w + uu) * wgt;
-            }
-            if (a < 2) continue;
-            uint32_t* d = back + py * SCREEN_W + px;
-            if (g->kind == 1) blend(d, (uint32_t)(r / a) << 16 | (uint32_t)(gg / a) << 8 | (uint32_t)(b / a), (uint32_t)a);
-            else blend(d, rgb, (uint32_t)a);
-        }
-    }
-}
-
-// (right-to-left text in reading order, as draw_text does)
 static void draw_text_scaled(const Font* f, float x, float y, const char* s, uint32_t rgb, float scale) {
     if (fabsf(scale - 1) < 0.06f) {
         draw_str(f, (int)lroundf(x), (int)lroundf(y), s, rgb);
         return;
     }
     const char* e = s + strlen(s);
-    static BSeg seg[64];
-    BSpan sp = {s, e, 0};
-    int n = has_rtl(s, e) ? bidi_split(&sp, 1, para_rtl(s, e), seg, 64) : -1;
-    if (n < 0) seg[0] = (BSeg){s, e, 0, 0}, n = 1;
-    for (int i = 0; i < n; i++) {
-        float w = text_width(f, seg[i].s, seg[i].e) * scale;
-        const char* p = seg[i].s;
-        int rtl = seg[i].rtl;
-        float px = rtl ? x + w : x, bx0 = px, bw = 0;
-        Glyph g;
-        for (int k; (k = next_glyph(f, seg[i].s, &p, seg[i].e, &g, rtl));) {
-            if (!rtl) {
-                blit_scaled(&g, px + g.bx * scale, y + g.by * scale, rgb, scale);
-                px += g.adv * scale;
-            } else if (k == 2 && !g.adv) {   // a mark, centred over its letter
-                blit_scaled(&g, bx0 + (bw - g.w * scale) / 2, y + g.by * scale, rgb, scale);
-            } else {
-                px -= g.adv * scale;
-                bx0 = px + g.bx * scale, bw = g.w * scale;
-                blit_scaled(&g, bx0, y + g.by * scale, rgb, scale);
+    Glyph g;
+    while (next_glyph(f, &s, e, &g)) {
+        float gx = x + g.bx * scale, gy = y + g.by * scale;
+        int W = (int)ceilf(g.w * scale), H = (int)ceilf(g.h * scale);
+        for (int j = 0; j < H; j++) {
+            int py = (int)gy + j;
+            if (py < clip_y0 || py >= clip_y1) continue;
+            float v = (j + 0.5f) / scale - 0.5f;
+            int v0 = (int)floorf(v);
+            float fv = v - v0;
+            for (int i = 0; i < W; i++) {
+                int px = (int)gx + i;
+                if (px < clip_x0 || px >= clip_x1) continue;
+                float u = (i + 0.5f) / scale - 0.5f;
+                int u0 = (int)floorf(u);
+                float fu = u - u0;
+                float r = 0, gg = 0, b = 0, a = 0;
+                for (int k = 0; k < 4; k++) {
+                    int uu = u0 + (k & 1), vv = v0 + (k >> 1);
+                    if (uu < 0 || vv < 0 || uu >= g.w || vv >= g.h) continue;
+                    float wgt = ((k & 1) ? fu : 1 - fu) * ((k >> 1) ? fv : 1 - fv);
+                    if (g.kind == 1) {
+                        const uint8_t* c = g.bm + (vv * g.w + uu) * 4;
+                        r += c[0] * wgt * c[3], gg += c[1] * wgt * c[3], b += c[2] * wgt * c[3], a += c[3] * wgt;
+                    } else a += g.bm[vv * g.w + uu] * wgt;
+                }
+                if (a < 2) continue;
+                uint32_t* d = back + py * SCREEN_W + px;
+                if (g.kind == 1) blend(d, (uint32_t)(r / a) << 16 | (uint32_t)(gg / a) << 8 | (uint32_t)(b / a), (uint32_t)a);
+                else blend(d, rgb, (uint32_t)a);
             }
         }
-        x += w;
+        x += g.adv * scale;
     }
 }
 

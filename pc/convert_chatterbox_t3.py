@@ -139,23 +139,17 @@ def export_tokenizer(path):
       "PTTK", u32 n_vocab, then per id: u8 length + UTF-8
       u32 n_merges, then per merge in rank order: <HHH (left id, right id, merged id)
       u32 n_added, then per added token (longest first): <H id, u8 length + UTF-8
-      u32 n_lower, then pairs <II (codepoint, lower case)            -- Python str.lower(), single characters
-      u32 n_nfkd, then per codepoint: <I cp, u8 n, n x <I            -- NFKD decompositions (Hangul syllables are
-                                                                       decomposed by the C code itself)
-      u32 n_ccc, then <II (first, last | class << 24)                -- canonical combining classes > 0, as ranges
-      u32 n_wr, then <II (first, last)                               -- \\w ranges above U+FFFF
-      word bitmap for codepoints 0..0xFFFF                           -- \\w of the Whitespace pre-tokenizer
-    Every codepoint is covered: the C code gives the same tokens as the official tokenizer for any script.
-    \\w is read from the pre-tokenizer itself (the tokenizers package), one codepoint at a time.
+      u32 n_lower, then pairs <II (codepoint, lower case)            -- Python str.lower(), codepoints < 0x3000
+      u32 n_nfkd, then per codepoint: <I cp, u8 n, n x <I            -- NFKD decompositions, codepoints < 0x3000
+      word bitmap for codepoints 0..0x2FFF (\\w of the Whitespace pre-tokenizer: letters, marks, numbers, '_')
     """
-    from tokenizers.pre_tokenizers import Whitespace
     j = json.loads((CB / "hf" / "grapheme_mtl_merged_expanded_v1.json").read_text(encoding="utf-8"))
     vocab = j["model"]["vocab"]
     n = max(vocab.values()) + 1
     toks = [b""] * n
     for s, i in vocab.items():
         toks[i] = s.encode()
-    blob = struct.pack("<4sI", b"PTT2", n) + b"".join(struct.pack("<B", len(t)) + t for t in toks)
+    blob = struct.pack("<4sI", b"PTTK", n) + b"".join(struct.pack("<B", len(t)) + t for t in toks)
     merges = j["model"]["merges"]
     mrec = b""
     for m in merges:
@@ -165,41 +159,24 @@ def export_tokenizer(path):
     added = sorted(j["added_tokens"], key=lambda a: -len(a["content"].encode()))
     blob += struct.pack("<I", len(added)) + b"".join(
         struct.pack("<HB", a["id"], len(a["content"].encode())) + a["content"].encode() for a in added)
-    cps = [c for c in range(0x110000) if not 0xD800 <= c < 0xE000]
-    lower = [(c, ord(chr(c).lower())) for c in cps if len(chr(c).lower()) == 1 and chr(c).lower() != chr(c)]
+    lower = [(c, ord(chr(c).lower())) for c in range(0x3000) if len(chr(c).lower()) == 1 and chr(c).lower() != chr(c)]
     blob += struct.pack("<I", len(lower)) + b"".join(struct.pack("<II", a, b) for a, b in lower)
     nfkd = []
-    for c in cps:
+    for c in range(0x80, 0x3000):
         d = unicodedata.normalize("NFKD", chr(c))
-        if c >= 0x80 and d != chr(c) and not 0xAC00 <= c <= 0xD7A3:
+        if d != chr(c):
             nfkd.append((c, [ord(x) for x in d]))
     blob += struct.pack("<I", len(nfkd)) + b"".join(
         struct.pack("<IB", c, len(d)) + struct.pack(f"<{len(d)}I", *d) for c, d in nfkd)
-
-    def ranges(pairs):   # (codepoint, value) in order -> [first, last, value] runs of consecutive codepoints
-        out = []
-        for c, v in pairs:
-            if out and out[-1][1] == c - 1 and out[-1][2] == v:
-                out[-1][1] = c
-            else:
-                out.append([c, c, v])
-        return out
-    ccc = ranges((c, unicodedata.combining(chr(c))) for c in cps if unicodedata.combining(chr(c)))
-    blob += struct.pack("<I", len(ccc)) + b"".join(struct.pack("<II", a, b | k << 24) for a, b, k in ccc)
-    ws = Whitespace()
-    is_w = lambda c: len(ws.pre_tokenize_str("a" + chr(c) + "a")) == 1   # "a?a" stays one word
-    wr = ranges((c, 1) for c in cps if c > 0xFFFF and is_w(c))
-    blob += struct.pack("<I", len(wr)) + b"".join(struct.pack("<II", a, b) for a, b, _ in wr)
-    bits = bytearray(0x10000 // 8)
-    for c in cps:
-        if c > 0xFFFF:
-            break
-        if is_w(c):
+    bits = bytearray(0x3000 // 8)
+    for c in range(0x3000):
+        ch = chr(c)
+        if ch.isalnum() or ch == "_" or unicodedata.category(ch)[0] in "LMN" or unicodedata.category(ch) == "Pc":
             bits[c >> 3] |= 1 << (c & 7)
     blob += bytes(bits)
     Path(path).write_bytes(blob)
     print(f"tts_tok.bin: {n} tokens, {len(merges)} merges, {len(added)} added, {len(lower)} lower, {len(nfkd)} nfkd, "
-          f"{len(ccc)} combining ranges, {len(wr)} word ranges above U+FFFF, {len(blob)} bytes")
+          f"{len(blob)} bytes")
 
 
 if __name__ == "__main__":

@@ -19,15 +19,9 @@ int st_opener_cut(const char* text, int len, int from, int lo, int hi);
 int st_speech_tokens(const char* w, int n, const char* lang);
 // The words to read aloud from in[0, n): without markdown, code, URLs or emoji. Returns the length (0 = nothing).
 int st_clean(const char* in, int n, char* out, int max);
-// Language for Chatterbox ("es", "en", "pt", "fr", "de", "it", "ru", "el", "ar", "ja"): fallback unless another
-// language is clearly more likely (character n-grams, speech_text.c; Arabic by its letters, Japanese by its kana).
-// Text with kanji but no kana is Japanese only if the console is (st_console_lang), else stays in fallback.
+// Language for Chatterbox ("es", "en", "pt", "fr", "de", "it", "ru", "el"): fallback unless another language is
+// clearly more likely (character n-grams, speech_text.c).
 const char* st_lang(const char* s, const char* fallback);
-// The console's language as a voice language ("ja", "es"...), for st_lang.
-void st_console_lang(const char* lang);
-// After a comma at text[i] that can end a clause: ", ", "、" (no space needed) or the Arabic "، ". Returns the
-// byte after it and its space, or 0.
-int st_comma_end(const char* text, int len, int i);
 // The language of the words of text[0, n) (st_clean, then st_lang).
 const char* st_text_lang(const char* text, int n, const char* fallback);
 // The piece's words as Chatterbox should read them, in place (s[0, n), at most max bytes): numbers, times, dates,

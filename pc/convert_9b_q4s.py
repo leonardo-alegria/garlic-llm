@@ -2,23 +2,13 @@
 trimmed to the rows of a keep list (KEEP below: a .npy of token ids, most frequent first).
 
 From models/qwen3.5-9b-mix.bin (written by pc/modal_qwen35_9b.py): every q4i matrix is laid out again as q4s (same
-nibbles, same scales: bit for bit the same weights); the MLP gate/up of the layers --q3 leaves out (none by default:
-all 32 stay 3-bit, as q3s) come again from the original weights (the checkpoint, only those tensors, read by byte
-ranges: pc/checkpoint.py) and are quantized with pc/q4.py like every other matrix of the app. The input embedding
-rows (q4row, read from the disk by the CPU) stay as they are: every token can still be read.
+nibbles, same scales: bit for bit the same weights); gate/up come again from the original bf16 weights
+(Qwen/Qwen3.5-9B on Hugging Face, only those tensors, read by byte ranges) and are quantized with pc/q4.py like every
+other matrix of the app. The input embedding rows (q4row, read from the disk by the CPU) stay as they are: every token
+can still be read.
 
   python convert_9b_q4s.py            -> models/qwen3.5-9b-q4s.bin/.json and model.idx (in IDX_OUT)
-  python convert_9b_q4s.py --mtp      -> models/qwen3.5-9b-mtp.bin and mtp.idx (in IDX_OUT)
   python convert_9b_q4s.py --check    -> compares a few rows of each converted matrix with the source
-
-Another model with Qwen3.5-9B's shapes (a fine-tune of it), as a folder ready for the console's models folder:
-  python convert_9b_q4s.py --mix=models/<name>-mix.bin --out=models/<name> [--src=<owner>/<model>] [--no-mtp]
-    --mix  what pc/modal_qwen35_9b.py made from that model (its .json beside it)
-    --src  the model's checkpoint (a Hugging Face repository or a local folder), if the .json does not name it.
-           It is checked first (pc/checkpoint.py), and its MTP head, if it has one, is converted from there.
-    --out  the folder: qwen3.5-9b-q4s.bin and model.idx, and qwen3.5-9b-mtp.bin and mtp.idx if the model has an MTP
-           head of its own (--no-mtp: not; without one the app uses the built-in head). pc/upload_model.py --model
-           <folder> copies it to the console.
 
 q4s (shaders/spec.h, SWAR_MVS): tiles of 128 rows (lane l = rows l and 64 + l), per tile and block of 32 columns two
 runs of 64 uint4; word k of a lane = columns 4k..4k+3, nibble i = row A, nibble 4 + i = row B. Scales: one dword per
@@ -29,9 +19,9 @@ File: [GPU part: final_norm, layers, lm_head][embedding rows (q4row)][ids: uint3
 model.idx: as pc/export_chat.py (PMQ5), flags bit 2 = "ids" record after lm_head; vocab = the rows that count.
 """
 import json
-import re
 import struct
 import sys
+import urllib.request
 from pathlib import Path
 
 import numpy as np
@@ -39,71 +29,17 @@ import numpy as np
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 sys.path.insert(0, str(HERE))
-from checkpoint import LAYER_TYPES, SHAPE, STOCK, Checkpoint, CheckpointError, check as check_source  # noqa: E402
 from q4 import quantize_q4  # noqa: E402
 
-
-def arg(name, default):
-    for a in sys.argv:
-        if a.startswith(f"--{name}="):
-            return a.split("=", 1)[1]
-    return default
-
-
-NAME = "qwen3.5-9b-q4s"   # (the app looks for the file names model.idx and mtp.idx give)
-MTP_NAME = "qwen3.5-9b-mtp"
-SRC = Path(arg("mix", str(ROOT / "models" / "qwen3.5-9b-mix.bin")))   # pc/modal_qwen35_9b.py's file
-FOLDER = Path(arg("out", "")) if arg("out", "") else None
-if FOLDER:   # another model: one folder for the console's models folder
-    OUT, META_OUT, IDX_OUT, MTP_OUT = FOLDER / f"{NAME}.bin", FOLDER / f"{NAME}.json", FOLDER, FOLDER / f"{MTP_NAME}.bin"
-else:        # the built-in model: the weights in models/, their indexes in the app's assets
-    OUT, META_OUT, IDX_OUT, MTP_OUT = (ROOT / "models" / f"{NAME}.bin", ROOT / "models" / f"{NAME}.json",
-                                       ROOT / "chat" / "assets_9b", ROOT / "models" / f"{MTP_NAME}.bin")
+SRC = ROOT / "models" / "qwen3.5-9b-mix.bin"
+META = json.loads((ROOT / "models" / "qwen3.5-9b-mix.json").read_text())
+NAME = "qwen3.5-9b-q4s"
+OUT = ROOT / "models" / f"{NAME}.bin"
+CACHE = ROOT / "models" / "q4s_cache"     # gate/up in q4s per layer (re-runs do not fetch them again)
+IDX_OUT = ROOT / "chat" / "assets_9b"
+HF = "https://huggingface.co/Qwen/Qwen3.5-9B/resolve/main/"
+HF_INDEX = json.loads((ROOT / "models" / "Qwen3.5-9B" / "model.safetensors.index.json").read_text())["weight_map"]
 FMT = {"q4": 2, "q8": 1, "q4i": 3, "q4row": 4, "q3i": 5, "q4s": 6, "ids": 7, "q3s": 8}
-_meta, _source = None, None
-
-
-def mix_meta():
-    """The index of the mix file (<mix>.json), checked for Qwen3.5-9B's shape."""
-    global _meta
-    if _meta is None:
-        j = SRC.with_suffix(".json")
-        if not SRC.is_file() or not j.is_file():
-            sys.exit(f"{SRC} and {j.name} beside it are needed: pc/modal_qwen35_9b.py::convert makes them (see its "
-                     "header)")
-        _meta = json.loads(j.read_text())
-        c = _meta["config"]
-        bad = [k for k, v in SHAPE.items() if c.get(k) != v] + ["layer_types"] * (c.get("layer_types") != LAYER_TYPES)
-        if bad:
-            sys.exit(f"{j}: not Qwen3.5-9B's shape ({', '.join(bad)} differ)")
-    return _meta
-
-
-def source_name():
-    """The checkpoint: --src, else the one the mix file was made from, else Qwen/Qwen3.5-9B (the built-in model)."""
-    given, made_from = arg("src", ""), mix_meta().get("checkpoint")
-    if given and made_from and given != made_from:
-        sys.exit(f"{SRC.name} was made from {made_from}, not {given}")
-    if FOLDER and not (given or made_from):
-        sys.exit(f"{SRC.with_suffix('.json').name} does not say which model it was made from: add --src=<that model>")
-    return given or made_from or STOCK
-
-
-def source():
-    """The checkpoint (pc/checkpoint.py), checked against Qwen3.5-9B's shapes the first time."""
-    global _source
-    if _source is None:
-        try:
-            _source = Checkpoint(source_name())
-            check_source(_source)
-        except CheckpointError as e:
-            sys.exit(str(e))
-    return _source
-
-
-def cache_dir():   # gate/up in q4s per layer, per checkpoint (re-runs do not fetch them again)
-    s = source_name()
-    return ROOT / "models" / ("q4s_cache" if s == STOCK else "q4s_cache-" + re.sub(r"[^\w.-]", "_", s))
 
 
 def to_q4s(q, d):
@@ -217,12 +153,31 @@ def pad128(q, d):
     return q, d
 
 
+_headers = {}
+
+
 def hf_tensor(name):
-    """One tensor of the checkpoint (by HTTP range from Hugging Face, or from its local folder) -> float32 numpy."""
-    try:
-        return source().tensor(name)
-    except CheckpointError as e:
-        sys.exit(str(e))
+    """One bf16 tensor of Qwen/Qwen3.5-9B by HTTP range -> float32 numpy."""
+    shard = HF_INDEX[name]
+    if shard not in _headers:
+        b = urllib.request.urlopen(urllib.request.Request(HF + shard, headers={"Range": "bytes=0-7"})).read()
+        n = struct.unpack("<Q", b)[0]
+        h = urllib.request.urlopen(urllib.request.Request(HF + shard, headers={"Range": f"bytes=8-{8 + n - 1}"})).read()
+        _headers[shard] = (8 + n, json.loads(h))
+    base, h = _headers[shard]
+    e = h[name]
+    assert e["dtype"] == "BF16", e
+    a, b = e["data_offsets"]
+    for attempt in range(5):
+        try:
+            req = urllib.request.Request(HF + shard, headers={"Range": f"bytes={base + a}-{base + b - 1}"})
+            raw = urllib.request.urlopen(req, timeout=600).read()
+            if len(raw) == b - a:
+                break
+        except Exception as ex:   # (retry: a long download may drop)
+            print("  retry", name, ex, flush=True)
+    u16 = np.frombuffer(raw, np.uint16).astype(np.uint32) << 16
+    return u16.view(np.float32).reshape(e["shape"])
 
 
 def q4_of(w):
@@ -233,13 +188,12 @@ def q4_of(w):
 
 
 def gate_up(i):
-    """Layer i's gate|up (24 576 x 4096) in q4s, from the checkpoint's weights (cached)."""
-    cache = cache_dir()
-    cache.mkdir(parents=True, exist_ok=True)
-    cw, cs = cache / f"{i}.wgu.w", cache / f"{i}.wgu.s"
+    """Layer i's gate|up (24 576 x 4096) in q4s, from the bf16 weights (cached)."""
+    CACHE.mkdir(exist_ok=True)
+    cw, cs = CACHE / f"{i}.wgu.w", CACHE / f"{i}.wgu.s"
     if cw.exists() and cs.exists():
         return cw.read_bytes(), cs.read_bytes()
-    p = f"{source().prefix}layers.{i}.mlp."
+    p = f"model.language_model.layers.{i}.mlp."
     q, d = [], []
     for part in ("gate_proj", "up_proj"):
         qq, dd = q4_of(hf_tensor(p + part + ".weight"))
@@ -251,6 +205,13 @@ def gate_up(i):
     return wb, sb
 
 
+def arg(name, default):
+    for a in sys.argv:
+        if a.startswith(f"--{name}="):
+            return a.split("=", 1)[1]
+    return default
+
+
 KEEP = Path(arg("keep", str(ROOT / "pc" / "vocab_order.npy")))   # every token id, most frequent first
 # gate/up layers that stay q3i (the source file's bytes) when the memory does not reach for all: --q3=12-19 or --q3=none
 _q3 = arg("q3", "0-31")
@@ -258,39 +219,9 @@ Q3_LAYERS = set() if _q3 == "none" else set(range(int(_q3.split("-")[0]), int(_q
 GU3 = arg("gu3", "q3s")   # those layers in q3s (SWAR, same bytes per weight) or q3i (the matvec_q3i kernels)
 
 
-def convert_tensor(f, k, t, keep):
-    """Tensor k of the mix file (open as f; t its record there) as the app's file holds it: (bytes, scale bytes,
-    its record without offset and size)."""
-    if k == "lm_head":
-        q, d = read_q4i(f, t)
-        q, d = pad128(q[keep], d[keep])
-        parts = []
-        for r in range(0, q.shape[0], 8192):
-            parts.append(to_q4s(q[r:r + 8192], d[r:r + 8192]))
-        wb = b"".join(p[0] for p in parts)
-        sb = b"".join(p[1] for p in parts)
-        return wb, sb, dict(rows=q.shape[0], cols=t["cols"], scales=len(wb), fmt="q4s", vocab=len(keep))
-    if k.endswith(".wgu") and int(k.split(".")[0]) in Q3_LAYERS and GU3 == "q3s":   # the source q3i, SWAR layout
-        wb, sb = to_q3s(*read_q3i(f, t))
-        return wb, sb, dict(rows=t["rows"], cols=t["cols"], scales=len(wb), fmt="q3s")
-    if k.endswith(".wgu") and int(k.split(".")[0]) in Q3_LAYERS:   # as in the source file (q3i)
-        f.seek(t["offset"])
-        return f.read(t["size"]), b"", {x: y for x, y in t.items() if x not in ("offset", "size")}
-    if k.endswith(".wgu"):
-        wb, sb = gate_up(int(k.split(".")[0]))
-        return wb, sb, dict(rows=t["rows"], cols=t["cols"], scales=len(wb), fmt="q4s")
-    if t.get("fmt") == "q4i":
-        q, d = pad128(*read_q4i(f, t))
-        wb, sb = to_q4s(q, d)
-        return wb, sb, dict(rows=q.shape[0], cols=t["cols"], scales=len(wb), fmt="q4s")
-    f.seek(t["offset"])
-    return f.read(t["size"]), b"", {x: y for x, y in t.items() if x not in ("offset", "size")}
-
-
 def main():
     keep = np.load(KEEP).astype(np.int64)
-    mix = mix_meta()
-    c, src = mix["config"], mix["tensors"]
+    c, src = META["config"], META["tensors"]
     order = ["final_norm"]
     for i, kind in enumerate(c["layer_types"]):
         mixer = ("q_norm", "k_norm", "wqkv", "wo") if kind == "full_attention" else (
@@ -299,7 +230,6 @@ def main():
     order.append("lm_head")
     tensors = {}
     f = open(SRC, "rb")
-    OUT.parent.mkdir(parents=True, exist_ok=True)
     out = open(OUT, "wb")
 
     def put(key, wb, sb=b"", **meta):
@@ -311,8 +241,33 @@ def main():
         out.write(b"\0" * pad)
 
     for k in order:
-        wb, sb, rec = convert_tensor(f, k, src[k], keep)
-        put(k, wb, sb, **rec)
+        t = src[k]
+        if k == "lm_head":
+            q, d = read_q4i(f, t)
+            q, d = pad128(q[keep], d[keep])
+            wb, sb = b"", b""
+            parts = []
+            for r in range(0, q.shape[0], 8192):
+                parts.append(to_q4s(q[r:r + 8192], d[r:r + 8192]))
+            wb = b"".join(p[0] for p in parts)
+            sb = b"".join(p[1] for p in parts)
+            put(k, wb, sb, rows=q.shape[0], cols=t["cols"], scales=len(wb), fmt="q4s", vocab=len(keep))
+        elif k.endswith(".wgu") and int(k.split(".")[0]) in Q3_LAYERS and GU3 == "q3s":   # the source q3i, SWAR layout
+            wb, sb = to_q3s(*read_q3i(f, t))
+            put(k, wb, sb, rows=t["rows"], cols=t["cols"], scales=len(wb), fmt="q3s")
+        elif k.endswith(".wgu") and int(k.split(".")[0]) in Q3_LAYERS:   # as in the source file (q3i)
+            f.seek(t["offset"])
+            put(k, f.read(t["size"]), **{x: y for x, y in t.items() if x not in ("offset", "size")})
+        elif k.endswith(".wgu"):
+            wb, sb = gate_up(int(k.split(".")[0]))
+            put(k, wb, sb, rows=t["rows"], cols=t["cols"], scales=len(wb), fmt="q4s")
+        elif t.get("fmt") == "q4i":
+            q, d = pad128(*read_q4i(f, t))
+            wb, sb = to_q4s(q, d)
+            put(k, wb, sb, rows=q.shape[0], cols=t["cols"], scales=len(wb), fmt="q4s")
+        else:
+            f.seek(t["offset"])
+            put(k, f.read(t["size"]), **{x: y for x, y in t.items() if x not in ("offset", "size")})
         print(k, tensors[k]["size"], tensors[k].get("fmt", ""), flush=True)
     gpu_size = out.tell()
     e = src["embed"]   # the input embedding rows, as they are
@@ -333,10 +288,10 @@ def main():
     out.close()
     meta = {"config": dict(c, vocab_size=len(keep)), "size": size, "gpu_size": gpu_size, "tensors": tensors,
             "source": SRC.name, "vocab_kept": len(keep), "keep": KEEP.name, "q3_layers": sorted(Q3_LAYERS)}
-    META_OUT.write_text(json.dumps(meta, indent=0))
+    (ROOT / "models" / f"{NAME}.json").write_text(json.dumps(meta, indent=0))
     write_index(meta)
     print(f"{OUT.name}: {size / 2**20:.0f} MiB, GPU part {gpu_size / 2**20:.0f} MiB (was "
-          f"{mix['gpu_size'] / 2**20:.0f}), lm_head {len(keep)} rows")
+          f"{META['gpu_size'] / 2**20:.0f}), lm_head {len(keep)} rows")
 
 
 def write_index(meta):
@@ -350,13 +305,12 @@ def write_index(meta):
         order += [f"{i}.{k}" for k in ("attn_norm", "mlp_norm", *mixer, "wgu", "wdown")]
     order += ["lm_head", "ids"]
     flags = 1 | 2 | 4
-    rp = c.get("rope_parameters") or c.get("rope_scaling") or {}   # (a config of the text model alone: at the top)
-    rope_dim = int(c["head_dim"] * rp.get("partial_rotary_factor", c.get("partial_rotary_factor", 1.0)))
-    path = f"/data/{NAME}.bin".encode()   # (a models folder's copy is read by its file name: chat/models.h)
+    rp = c["rope_parameters"]
+    rope_dim = int(c["head_dim"] * rp.get("partial_rotary_factor", 1.0))
+    path = f"/data/{NAME}.bin".encode()
     head = struct.pack("<4s10I2f128sQI", b"PMQ5", c["num_hidden_layers"], c["hidden_size"], c["intermediate_size"],
                        c["num_attention_heads"], c["num_key_value_heads"], c["head_dim"], c["vocab_size"],
-                       8192, 248046, 248044, c["rms_norm_eps"], rp.get("rope_theta", c.get("rope_theta")), path,
-                       meta["gpu_size"], len(order))
+                       8192, 248046, 248044, c["rms_norm_eps"], rp["rope_theta"], path, meta["gpu_size"], len(order))
     head += struct.pack("<8I", c["linear_num_key_heads"], c["linear_num_value_heads"], c["linear_key_head_dim"],
                         c["linear_value_head_dim"], rope_dim, mask, 248045, flags)
     recs = []
@@ -370,11 +324,11 @@ def write_index(meta):
 
 
 def check():
-    meta = json.loads(META_OUT.read_text())
+    meta = json.loads((ROOT / "models" / f"{NAME}.json").read_text())
     keep = np.load(KEEP).astype(np.int64)
     f, g = open(SRC, "rb"), open(OUT, "rb")
     for k in ("0.w_in", "3.wqkv", "31.wdown", "lm_head"):
-        t, s = meta["tensors"][k], mix_meta()["tensors"][k]
+        t, s = meta["tensors"][k], META["tensors"][k]
         g.seek(t["offset"])
         wb = g.read(t["scales"])
         sb = g.read(t["size"] - t["scales"])
@@ -386,42 +340,30 @@ def check():
         n = q0.shape[0]
         print(k, "nibbles equal:", bool((q[:n] == q0).all()), "scales equal:", bool((d[:n] == d0).all()))
     t = meta["tensors"]["0.wgu"]
-    if t.get("fmt") != "q4s":   # (3-bit gate/up are the mix file's own weights, laid out again)
-        print("0.wgu is", t.get("fmt"), "(from the mix file): no comparison with the checkpoint")
-        return
     g.seek(t["offset"])
     wb = g.read(t["scales"])
     sb = g.read(t["size"] - t["scales"])
     q, d = from_q4s(wb, sb, t["rows"], t["cols"])
-    w = hf_tensor(f"{source().prefix}layers.0.mlp.gate_proj.weight")[:256]
+    w = hf_tensor("model.language_model.layers.0.mlp.gate_proj.weight")[:256]
     deq = (q[:256].astype(np.float32) - 8) * np.repeat(d[:256].astype(np.float32), 32, axis=1)
     print("0.wgu gate rows 0..255: relative error of q4 vs bf16",
           float(np.linalg.norm(deq - w) / np.linalg.norm(w)))
 
 
-MTP_ORDER =["pre_e", "pre_h", "fc", "attn_norm", "mlp_norm", "q_norm", "k_norm", "wqkv", "wo", "wgu", "wdown", "norm"]
+MTP_NAME = "qwen3.5-9b-mtp"
+MTP_ORDER = ["pre_e", "pre_h", "fc", "attn_norm", "mlp_norm", "q_norm", "k_norm", "wqkv", "wo", "wgu", "wdown", "norm"]
 ND = 32768   # draft rows: the first ND rows of the trimmed lm_head
 
 
 def mtp():
     """The MTP head (mtp.*, which pc/modal_qwen35_9b.py does not convert) in q4s, norms as 1 + w like the 9B's, q_proj
     split into q | k | v | gate rows like wqkv; then the embedding rows (q4row) of the first ND kept tokens: the draft's
-    tokens, which the GPU reads itself (chat/engine_spec.inc). -> models/qwen3.5-9b-mtp.bin and mtp.idx (in IDX_OUT),
-    or both in the --out folder"""
+    tokens, which the GPU reads itself (chat/engine_spec.inc). -> models/qwen3.5-9b-mtp.bin and mtp.idx (in IDX_OUT)"""
     keep = np.load(KEEP).astype(np.int64)
-    mix = mix_meta()
-    c = mix["config"]
+    c = META["config"]
     nh, hd = c["num_attention_heads"], c["head_dim"]
     P = "mtp."
-    ck = source()
-    if not ck.has_mtp:
-        sys.exit(f"{ck.src} has no MTP head (no mtp.* tensors): the app drafts with the built-in one")
-    try:
-        check_source(ck, mtp=True)
-    except CheckpointError as e:
-        sys.exit(str(e))
-    MTP_OUT.parent.mkdir(parents=True, exist_ok=True)
-    out = open(MTP_OUT, "wb")
+    out = open(ROOT / "models" / f"{MTP_NAME}.bin", "wb")
     recs = {}
 
     def put(key, data, rows=0, cols=0, scales=0, fmt=0):
@@ -455,7 +397,7 @@ def mtp():
     q4s("wdown", hf_tensor(L + "mlp.down_proj.weight"))
     f32("norm", 1.0 + hf_tensor(P + "norm.weight"))
     wsize = out.tell()
-    e = mix["tensors"]["embed"]   # the draft rows' input embeddings, in lm_head row order
+    e = META["tensors"]["embed"]   # the draft rows' input embeddings, in lm_head row order
     rb = e["rowbytes"]
     with open(SRC, "rb") as f:
         for tokid in keep[:ND]:
@@ -471,30 +413,10 @@ def mtp():
     print(f"{MTP_NAME}.bin: tensors {wsize / 2**20:.1f} MiB + draft table {tsize / 2**20:.1f} MiB; mtp.idx {len(head + body)} B")
 
 
-def make_folder():
-    """--out: the model and, if its checkpoint has one, its own MTP head, in one folder for the console."""
-    mix_meta()
-    own_mtp = "--no-mtp" not in sys.argv and source().has_mtp   # (the checkpoint is checked now, before the long part)
-    if own_mtp:
-        try:
-            check_source(source(), mtp=True)
-        except CheckpointError as e:
-            sys.exit(str(e))
-    main()
-    if own_mtp:
-        mtp()
-    else:
-        why = "--no-mtp" if "--no-mtp" in sys.argv else f"{source_name()} has no mtp.* tensors"
-        print(f"no MTP head of its own ({why}): the app drafts with the built-in one")
-        if MTP_OUT.exists():
-            print(f"{MTP_OUT.name} from an earlier run is still in the folder, and the app would use it")
-    print(f"ready: {FOLDER}\nto copy it to the console: python pc/upload_model.py --model {FOLDER}")
-
-
 if __name__ == "__main__":
     if "--fetch" in sys.argv:   # only gate/up of every layer into the cache (no keep.npy needed)
         import time
-        for i in range(mix_meta()["config"]["num_hidden_layers"]):
+        for i in range(META["config"]["num_hidden_layers"]):
             t0 = time.time()
             gate_up(i)
             print(f"layer {i} gate/up in q4s: {time.time() - t0:.0f} s", flush=True)
@@ -504,7 +426,7 @@ if __name__ == "__main__":
         mtp()
     elif "--test-q3s" in sys.argv:   # to_q3s against a plain integer dot product (layer 0's gate/up, 256 rows)
         with open(SRC, "rb") as f:
-            q, d = read_q3i(f, mix_meta()["tensors"]["0.wgu"])
+            q, d = read_q3i(f, META["tensors"]["0.wgu"])
         q, d = q[:256], d[:256]
         rng = np.random.default_rng(1)
         x8 = rng.integers(-127, 128, 4096)
@@ -519,7 +441,5 @@ if __name__ == "__main__":
             got[T * 128 + 64:T * 128 + 128] = hi[T].T
         print("q3s emulation equals the integer sums:", bool((got == ref).all()))
         print("q3i read back = q3.py quantize of nothing to compare; values in 0..7:", int(q.min()), int(q.max()))
-    elif FOLDER:
-        make_folder()
     else:
         main()

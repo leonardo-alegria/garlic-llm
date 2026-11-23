@@ -17,10 +17,7 @@ use their Reserved Font Names.
   Copyright 2022 The Noto Project Authors (https://github.com/notofonts/math). SIL OFL 1.1.
 - Noto Music
   Copyright 2022 The Noto Project Authors (https://github.com/notofonts/music). SIL OFL 1.1.
-- Noto Sans Arabic (árabe y persa)
-  Copyright 2022 The Noto Project Authors (https://github.com/notofonts/arabic). SIL OFL 1.1.
-- Noto Sans SC (chino simplificado), Noto Sans TC (chino tradicional), Noto Sans JP (japonés), Noto Sans KR
-  (coreano)
+- Noto Sans SC (chino), Noto Sans KR (coreano)
   Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'. SIL OFL 1.1.
 - Arimo
   Copyright 2026 The Arimo Project Authors (https://github.com/googlefonts/arimo). SIL OFL 1.1.

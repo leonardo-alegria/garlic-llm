@@ -49,30 +49,155 @@ const char* ui_error = "";
 
 // ---- strings ---------------------------------------------------------------------------------------------------
 
-#include "ui_strings.inc"
+static const char* strings[N_STRINGS][N_LANGS] = {
+    [S_TAGLINE] = {"%s en la GPU de tu PS4.", "%s on your PS4's GPU.", "%s na GPU do seu PS4.", "%s на GPU вашей PS4."},   // the model's name
+    [S_EMPTY_HINT] = {"100% local y sin internet.", "100% local, no internet.", "100% local e sem internet.",
+                      "100% локально, без интернета."},
+    [S_WRITE] = {"Escribir", "Type", "Escrever", "Написать"},
+    [S_TALK_HOLD] = {"Mantén para hablar", "Hold to talk", "Segure para falar", "Голос (удерживать)"},
+    [S_STOP] = {"Detener", "Stop", "Parar", "Остановить"},
+    [S_NEW_CHAT] = {"Nueva conversación", "New chat", "Nova conversa", "Новый чат"},
+    [S_SCROLL] = {"Desplazar", "Scroll", "Rolar", "Прокрутка"},
+    [S_TEMPERATURE] = {"Temperatura", "Temperature", "Temperatura", "Температура"},
+    [S_CONTEXT] = {"contexto", "context", "contexto", "контекст"},
+    [S_READING] = {"Leyendo tu mensaje…", "Reading your message…", "Lendo sua mensagem…", "Читаю сообщение…"},
+    [S_CONTEXT_FULL] = {"La conversación llenó la memoria del modelo; empiezo una nueva.",
+                        "The conversation filled the model's memory; starting a new one.",
+                        "A conversa encheu a memória do modelo; começando uma nova.",
+                        "Разговор заполнил память модели; начинаю новый."},
+    [S_PLACEHOLDER] = {"Escribe un mensaje…", "Type a message…", "Digite uma mensagem…", "Введите сообщение…"},
+    [S_KB_TYPE] = {"Escribir", "Type", "Digitar", "Ввод"},
+    [S_KB_DELETE] = {"Borrar", "Delete", "Apagar", "Удалить"},
+    [S_KB_SPACE] = {"Espacio", "Space", "Espaço", "Пробел"},
+    [S_KB_SHIFT] = {"Mayúsculas", "Shift", "Maiúsculas", "Регистр"},
+    [S_KB_EMOJI] = {"Emoji", "Emoji", "Emoji", "Эмодзи"},
+    [S_KB_LETTERS] = {"Letras", "Letters", "Letras", "Буквы"},
+    [S_KB_DICTATE] = {"Dictar (mantener)", "Dictate (hold)", "Ditar (segurar)", "Диктовка (удерж.)"},
+    [S_KB_SEND] = {"Enviar", "Send", "Enviar", "Отправить"},
+    [S_KB_CLOSE] = {"Cerrar", "Close", "Fechar", "Закрыть"},
+    [S_SPACE_KEY] = {"espacio", "space", "espaço", "пробел"},
+    [S_SEND_KEY] = {"Enviar", "Send", "Enviar", "Отправить"},
+    [S_LISTENING] = {"Escuchando…", "Listening…", "Ouvindo…", "Слушаю…"},
+    [S_RELEASE_TO_END] = {"Suelta para terminar", "Release to finish", "Solte para terminar", "Отпустите, чтобы закончить"},
+    [S_TRANSCRIBING] = {"Transcribiendo…", "Transcribing…", "Transcrevendo…", "Распознаю речь…"},
+    [S_YOUR_MESSAGE] = {"Tu mensaje", "Your message", "Sua mensagem", "Ваше сообщение"},
+    [S_SEND] = {"Enviar", "Send", "Enviar", "Отправить"},
+    [S_EDIT] = {"Editar", "Edit", "Editar", "Изменить"},
+    [S_RETRY] = {"Repetir", "Retry", "Repetir", "Заново"},
+    [S_DISCARD] = {"Descartar", "Discard", "Descartar", "Отмена"},
+    [S_NO_MIC] = {"No se detecta micrófono: conecta unos auriculares al mando.",
+                  "No microphone found: plug a headset into the controller.",
+                  "Nenhum microfone detectado: conecte um fone ao controle.",
+                  "Микрофон не найден: подключите гарнитуру к геймпаду."},
+    [S_NO_SPEECH] = {"No se entendió nada. Inténtalo otra vez.", "Didn't catch that. Try again.",
+                     "Não entendi nada. Tente de novo.", "Ничего не распознано. Попробуйте ещё раз."},
+    [S_ASR_OFF] = {"El reconocimiento de voz no está disponible.", "Speech recognition is not available.",
+                   "O reconhecimento de voz não está disponível.", "Распознавание речи недоступно."},
+    [S_HOLD_LONGER] = {"Mantén □ pulsado mientras hablas.", "Keep □ held while you speak.",
+                       "Mantenha □ pressionado enquanto fala.", "Держите □, пока говорите."},
+    [S_PREPARING] = {"Preparando", "Getting ready", "Preparando", "Подготовка"},
+    [S_LOADING_MODEL] = {"Cargando el modelo", "Loading the model", "Carregando o modelo", "Загрузка модели"},
+    [S_LOADING_VOICE] = {"Cargando el reconocimiento de voz", "Loading speech recognition",
+                         "Carregando o reconhecimento de voz", "Загрузка распознавания речи"},
+    [S_ERROR_TITLE] = {"No se pudo iniciar", "Couldn't start", "Não foi possível iniciar", "Не удалось запустить"},
+    [S_ERROR_HINT] = {"Pulsa el botón PS para salir.", "Press the PS button to exit.", "Pressione o botão PS para sair.",
+                      "Нажмите кнопку PS, чтобы выйти."},
+    [S_OFFLINE] = {"100 % sin conexión", "100% offline", "100% offline", "100% офлайн"},
+    [S_SYSTEM_PROMPT] = {
+        "Eres Garlic LLM, un asistente útil que funciona sin internet en la GPU de una PlayStation 4. "
+        "Responde en el idioma del usuario, de forma clara y sin rodeos.",
+        "You are Garlic LLM, a helpful assistant running offline on a PlayStation 4's GPU. Answer in the "
+        "user's language, clearly and directly.",
+        "Você é o Garlic LLM, um assistente útil que funciona sem internet na GPU de um PlayStation 4. "
+        "Responda no idioma do usuário, de forma clara e direta.",
+        "Ты — Garlic LLM, полезный ассистент, который работает без интернета на GPU PlayStation 4. Отвечай на "
+        "языке пользователя, ясно и по делу."},
+    [S_LOCAL_GPU] = {"GPU local", "local GPU", "GPU local", "локальный GPU"},
+    [S_PY_RUN] = {"Ejecutar Python", "Run Python", "Executar Python", "Запустить Python"},
+    [S_PY_EXIT] = {"Salir", "Exit", "Sair", "Выйти"},
+    [S_PY_CLICK] = {"Clic", "Click", "Clique", "Клик"},
+    [S_PY_RCLICK] = {"Clic derecho", "Right click", "Clique direito", "Правый клик"},
+    [S_PY_MOVE] = {"Mover", "Move", "Mover", "Двигать"},
+    [S_PY_KEYS] = {"Flechas", "Arrows", "Setas", "Стрелки"},
+    [S_PY_BACK] = {"Volver al chat", "Back to chat", "Voltar ao chat", "Назад в чат"},
+    [S_PY_AGAIN] = {"Ejecutar de nuevo", "Run again", "Executar de novo", "Запустить снова"},
+    [S_PY_FIX] = {"Pedir arreglo", "Ask for a fix", "Pedir correção", "Попросить исправить"},
+    [S_PY_DONE] = {"Programa terminado", "Program finished", "Programa terminado", "Программа завершена"},
+    [S_PY_ERROR] = {"El programa tuvo un error", "The program hit an error", "O programa teve um erro", "В программе ошибка"},
+    [S_PY_STOPPED] = {"Programa detenido", "Program stopped", "Programa interrompido", "Программа остановлена"},
+    [S_PY_STARTING] = {"Ejecutando", "Running", "Executando", "Запуск"},
+    // "Ask for a fix": states that the program ran on the PS4 itself; without that context the model may answer
+    // that Python cannot run on a PS4
+    [S_PY_FIX_MSG] = {
+        "Ejecuté tu programa aquí mismo, en la PS4, y falló con este error:",
+        "I ran your program right here on the PS4, and it failed with this error:",
+        "Executei o seu programa aqui mesmo, no PS4, e ele falhou com este erro:",
+        "Я запустил твою программу прямо здесь, на PS4, и она завершилась с ошибкой:"},
+    // "Ask for a fix", the request: lists what Garlic's Python has and what it lacks
+    [S_PY_FIX_ASK] = {
+        "Corrígelo para el Python 3 de Garlic (MicroPython): hay turtle, pygame y tkinter adaptados a la tele "
+        "(las flechas, Espacio y Enter van al mando), input(), print(), random, math, time, collections, "
+        "itertools, string y copy; no hay numpy, matplotlib, archivos, red ni sonido. Casi siempre el fallo "
+        "está en el propio código: busca la causa y corrígela sin quitar nada de lo pedido. Escribe el "
+        "programa completo en un solo bloque ```python.",
+        "Fix it for Garlic's Python 3 (MicroPython): it has turtle, pygame and tkinter adapted to the TV "
+        "(arrows, Space and Enter are on the controller), input(), print(), random, math, time, collections, "
+        "itertools, string and copy; there is no numpy, matplotlib, files, network or sound. The bug is "
+        "almost always in the code itself: find the cause and fix it without dropping anything that was asked "
+        "for. Write the whole program in a single ```python block.",
+        "Corrija-o para o Python 3 do Garlic (MicroPython): há turtle, pygame e tkinter adaptados à TV (as "
+        "setas, Espaço e Enter ficam no controle), input(), print(), random, math, time, collections, "
+        "itertools, string e copy; não há numpy, matplotlib, arquivos, rede nem som. Quase sempre a falha "
+        "está no próprio código: encontre a causa e corrija sem tirar nada do que foi pedido. Escreva o "
+        "programa completo em um único bloco ```python.",
+        "Исправь её для Python 3 в Garlic (MicroPython): есть turtle, pygame и tkinter для телевизора "
+        "(стрелки, пробел и Enter — на геймпаде), input(), print(), random, math, time, collections, "
+        "itertools, string и copy; нет numpy, matplotlib, файлов, сети и звука. Почти всегда ошибка в самом "
+        "коде: найди причину и исправь её, ничего не убирая из того, что просили. Напиши всю программу "
+        "целиком в одном блоке ```python."},
+    [S_PY_INPUT] = {"Responde al programa…", "Answer the program…", "Responda ao programa…", "Ответьте программе…"},
+    [S_VOICE_MODE] = {"Modo voz", "Voice mode", "Modo voz", "Голосовой режим"},
+    [S_THINKING] = {"Pensando…", "Thinking…", "Pensando…", "Думаю…"},
+    [S_LISTENING_SHORT] = {"Te escucho…", "Listening…", "Estou ouvindo…", "Слушаю…"},
+    [S_VOICE_LOADING] = {"Preparando la voz…", "Getting the voice ready…", "Preparando a voz…", "Готовлю голос…"},
+    [S_VOICE_NO_TTS] = {"La voz no está disponible: Garlic responderá con texto", "The voice is not available: Garlic will answer in text",
+                        "A voz não está disponível: o Garlic responderá em texto", "Голос недоступен: Garlic ответит текстом"},
+    // "Think" (R3)
+    [S_THINK_OFF_HINT] = {"Pensar: no", "Think: off", "Pensar: não", "Думать: нет"},
+    [S_THINK_ON_HINT] = {"Pensar: sí", "Think: on", "Pensar: sim", "Думать: да"},
+    [S_THINK_ON_TOAST] = {"Pensar activado: más acierto en preguntas difíciles, pero tarda ~1 min",
+                          "Thinking on: better at hard questions, but takes ~1 min",
+                          "Pensar ativado: acerta mais em perguntas difíceis, mas demora ~1 min",
+                          "Размышление включено: точнее в трудных вопросах, но около минуты"},
+    [S_THINK_OFF_TOAST] = {"Pensar desactivado: respuestas al momento", "Thinking off: instant answers",
+                           "Pensar desativado: respostas na hora", "Размышление выключено: ответы сразу"},
+    [S_THOUGHT] = {"Pensó %d s · %d tokens", "Thought for %d s · %d tokens", "Pensou %d s · %d tokens",
+                   "Думал %d с · токенов: %d"},
+    [S_THINK_CUT] = {"tope alcanzado", "limit reached", "limite atingido", "лимит"},
+    [S_THINK_CHIP] = {"Pensar", "Think", "Pensar", "Думать"},
+    // The OpenAI-compatible API (L3). The toast that turns it on is followed by its address: "API on: http://..."
+    [S_API_ON] = {"API encendida", "API on", "API ligada", "API включён"},
+    [S_API_OFF] = {"API apagada", "API off", "API desligada", "API выключен"},
+    [S_API_FAILED] = {"La API no pudo iniciarse: revisa la red de la consola",
+                      "The API could not start: check the console's network",
+                      "A API não pôde iniciar: verifique a rede do console",
+                      "Не удалось запустить API: проверьте сеть консоли"},
+    [S_API_BUSY] = {"Respondiendo a una petición de la API…", "Answering an API request…",
+                    "Respondendo a uma requisição da API…", "Отвечаю на запрос API…"},
+    [S_API_DONE] = {"Respondí una petición de la API; empiezo una conversación nueva.",
+                    "I answered an API request; starting a new conversation.",
+                    "Respondi a uma requisição da API; começando uma nova conversa.",
+                    "Ответил на запрос API; начинаю новый разговор."},
+};
 
 const char* tr(StrId id) { return strings[id][ui_lang] ? strings[id][ui_lang] : strings[id][LANG_EN]; }
 
-// OrbisSystemParamLanguage (orbis/_types/sys_service.h): 0 Japanese, 1 English (US), 2 French, 3 Spanish, 4 German,
-// 7 Portuguese (Portugal), 8 Russian, 9 Korean, 10 Chinese (Traditional), 11 Chinese (Simplified), 17 Portuguese
-// (Brazil), 18 English (UK), 20 Spanish (Latin America), 21 Arabic, 22 French (Canada). The rest: English.
 int lang_from_system(int l) {
-    switch (l) {
-    case 0: return LANG_JA;
-    case 2: case 22: return LANG_FR;
-    case 3: case 20: return LANG_ES;
-    case 4: return LANG_DE;
-    case 7: case 17: return LANG_PT;
-    case 8: return LANG_RU;
-    case 9: return LANG_KO;
-    case 10: return LANG_ZH_HANT;
-    case 11: return LANG_ZH_HANS;
-    case 21: return LANG_AR;
-    default: return LANG_EN;
-    }
+    if (l == 3 || l == 20) return LANG_ES;   // Spanish, Spanish (Latin America)
+    if (l == 7 || l == 17) return LANG_PT;   // Portuguese (Portugal, Brazil)
+    if (l == 8) return LANG_RU;
+    return LANG_EN;
 }
-
-int lang_rtl(int lang) { return lang == LANG_AR; }
 
 // ---- pixels and shapes -------------------------------------------------------------------------------------------
 
@@ -340,22 +465,12 @@ static void fade_rows(int y0, int y1, int a0, int a1) {
 
 // ---- fonts (PFN2 from pc/export_chat.py) ----------------------------------------------------------------------
 // Header "<4sHHII" (magic, line height, ascent, glyph count, bitmap bytes); per glyph "<IHHhhHBBI" (codepoint,
-// width, height, left, top, advance, kind 0 = alpha / 1 = RGBA / 2 = 4-bit alpha (two pixels a byte, the first in
-// the low half), pad, bitmap offset), sorted by codepoint; then the bitmaps; then optionally "SEQS" + count + per
-// sequence "<BBHI" (length, 0, 0, glyph index) and its codepoints: emoji made of several characters (flags,
-// keycaps, joined emoji), drawn as one image.
+// width, height, left, top, advance, kind 0 = alpha / 1 = RGBA, pad, bitmap offset), sorted by codepoint; then
+// the bitmaps; then optionally "SEQS" + count + per sequence "<BBHI" (length, 0, 0, glyph index) and its
+// codepoints: emoji made of several characters (flags, keycaps, joined emoji), drawn as one image.
 // Emoji images are Twemoji (CC-BY 4.0, credited in assets/CREDITOS.txt).
-//
-// Chinese, Japanese and Korean: the Simplified Chinese forms sit at their own codepoints; the Japanese and the
-// Traditional Chinese forms that differ (or that the first set lacks) at VAR_JP / VAR_TC + codepoint. Each
-// language looks first in its own set (cjk_order). The hint and title fonts also hold the interface's own
-// characters at UI_VAR + (VAR_JP / VAR_TC +) codepoint; font_head, the copy of font_big for markdown headings,
-// stops before them, so a heading is not drawn half in one size and half in another.
 #define FONT_HEADER 16
 #define FONT_REC 20
-#define VAR_JP 0x200000u
-#define VAR_TC 0x400000u
-#define UI_VAR 0x800000u
 
 typedef struct Font {
     uint16_t line, ascent;
@@ -371,19 +486,16 @@ typedef struct Font {
     uint32_t* seq_glyph;
     const uint8_t** seq_cps;
     int space;                 // advance of ' '
-    int has_ui;                // holds interface characters (UI_VAR)
-    int embolden;              // bold: a glyph it borrows from the regular font is drawn twice, a pixel apart
 } Font;
 
 typedef struct {
     uint16_t w, h, adv;
     int16_t bx, by;
     uint8_t kind;
-    uint8_t borrowed;   // from a font further down the chain (font->next...)
     const uint8_t* bm;
 } Glyph;
 
-static Font font, font_bold, font_italic, font_small, font_big, font_head, mono;
+static Font font, font_bold, font_italic, font_small, font_big, mono;
 
 static uint32_t utf8_next(const char** s) {
     const uint8_t* p = (const uint8_t*)*s;
@@ -418,11 +530,6 @@ static void glyph_at(const Font* f, int i, Glyph* g) {
     g->bm = f->bitmaps + off;
 }
 
-// Coverage (0-255) of pixel k (row by row) of an alpha glyph.
-static inline uint32_t glyph_alpha(const Glyph* g, int k) {
-    return g->kind == 2 ? (uint32_t)(g->bm[k >> 1] >> ((k & 1) << 2) & 15) * 17 : g->bm[k];
-}
-
 static int find_cp(const Font* f, uint32_t cp) {
     int lo = 0, hi = (int)f->n - 1;
     while (lo <= hi) {
@@ -431,28 +538,6 @@ static int find_cp(const Font* f, uint32_t cp) {
         if (f->cps[mid] < cp) lo = mid + 1;
         else hi = mid - 1;
     }
-    return -1;
-}
-
-static int cjk_variant_cp(uint32_t c) {   // may have forms of its own per language (see VAR_JP)
-    return (c >= 0x2E80 && c <= 0x9FFF) || (c >= 0xAC00 && c <= 0xD7A3) || (c >= 0xF900 && c <= 0xFAFF) ||
-           (c >= 0xFE30 && c <= 0xFE4F) || (c >= 0xFF00 && c <= 0xFFEF) || (c >= 0x1100 && c <= 0x11FF) ||
-           (c >= 0x20000 && c <= 0x3FFFF);
-}
-
-static const uint32_t* cjk_order(void) {   // where to look first: the forms of the interface's language
-    static const uint32_t jp[3] = {VAR_JP, 0, VAR_TC}, tc[3] = {VAR_TC, 0, VAR_JP}, sc[3] = {0, VAR_TC, VAR_JP};
-    return ui_lang == LANG_JA ? jp : ui_lang == LANG_ZH_HANT || ui_lang == LANG_KO ? tc : sc;   // (Korean hanja:
-}                                                                                          // traditional forms)
-
-static int find_glyph(const Font* f, uint32_t cp) {
-    if (!cjk_variant_cp(cp)) return find_cp(f, cp);
-    const uint32_t* o = cjk_order();
-    for (int u = f->has_ui ? 0 : 1; u < 2; u++)
-        for (int r = 0; r < 3; r++) {
-            int i = find_cp(f, (u ? 0 : UI_VAR) + o[r] + cp);
-            if (i >= 0) return i;
-        }
     return -1;
 }
 
@@ -473,7 +558,6 @@ static int font_load(Font* f, const char* path) {
         memcpy(&f->cps[i], f->recs + i * FONT_REC, 4);
         if (f->cps[i] == 0xFFFD) f->fallback = (int)i;
     }
-    f->has_ui = f->n && f->cps[f->n - 1] >= UI_VAR;
     const uint8_t* p = f->bitmaps + bitmap_bytes;
     if ((size_t)(p - d) + 8 <= size && !memcmp(p, "SEQS", 4)) {
         memcpy(&f->n_seq, p + 4, 4);
@@ -497,12 +581,10 @@ static int font_load(Font* f, const char* path) {
     return 0;
 }
 
-// Joiners, variation selectors, keycap marks, skin-tone modifiers outside a known sequence and the bidirectional
-// controls draw as nothing.
+// Joiners, variation selectors, keycap marks and skin-tone modifiers outside a known sequence draw as nothing.
 static int invisible(uint32_t cp) {
     return (cp >= 0x200B && cp <= 0x200F) || (cp >= 0xFE00 && cp <= 0xFE0F) || (cp >= 0x1F3FB && cp <= 0x1F3FF) ||
-           (cp >= 0xE0000 && cp <= 0xE007F) || cp == 0x20E3 || (cp >= 0x202A && cp <= 0x202E) ||
-           (cp >= 0x2066 && cp <= 0x2069);
+           (cp >= 0xE0000 && cp <= 0xE007F) || cp == 0x20E3;
 }
 
 static void missing(uint32_t cp) {   // each character no font can draw is logged once
@@ -547,433 +629,70 @@ static int match_sequence(const Font* f, uint32_t cp, const char* s, const char*
     return best;
 }
 
-// ---- Arabic letters: joined by drawing each one in its contextual form (also Persian and Urdu) ------------------
-
-#include "arabic_forms.h"
-
-static const uint16_t* ar_letter(uint32_t cp) {   // its row of ar_forms, or NULL
-    if (cp < 0x0621 || cp > 0x06FF) return NULL;
-    int lo = 0, hi = (int)(sizeof(ar_forms) / sizeof(ar_forms[0])) - 1;
-    while (lo <= hi) {
-        int mid = (lo + hi) / 2;
-        if (ar_forms[mid][0] == cp) return ar_forms[mid];
-        if (ar_forms[mid][0] < cp) lo = mid + 1;
-        else hi = mid - 1;
-    }
-    return NULL;
-}
-
-// Vowel signs and other marks over or under a letter: they do not break the joining.
-static int ar_mark(uint32_t c) {
-    return (c >= 0x0610 && c <= 0x061A) || (c >= 0x064B && c <= 0x065F) || c == 0x0670 || (c >= 0x06D6 && c <= 0x06DC) ||
-           (c >= 0x06DF && c <= 0x06E4) || c == 0x06E7 || c == 0x06E8 || (c >= 0x06EA && c <= 0x06ED);
-}
-
-// Joins on to the next letter (dual-joining letters, tatweel, zero-width joiner) / to the one before (those and
-// the right-joining letters). A zero-width non-joiner joins neither way.
-static int ar_joins_next(uint32_t c) {
-    const uint16_t* r;
-    return c == 0x0640 || c == 0x200D || ((r = ar_letter(c)) && r[3]);
-}
-static int ar_joins_prev(uint32_t c) {
-    const uint16_t* r;
-    return c == 0x0640 || c == 0x200D || ((r = ar_letter(c)) && r[2]);
-}
-
-static uint32_t cp_before(const char* begin, const char* at) {   // the character before `at`, marks skipped; 0 = none
-    while (at > begin) {
-        const char* p = at - 1;
-        while (p > begin && ((uint8_t)*p & 0xC0) == 0x80) p--;
-        const char* q = p;
-        uint32_t c = utf8_next(&q);
-        if (!ar_mark(c)) return c;
-        at = p;
-    }
-    return 0;
-}
-
-static uint32_t cp_after(const char* s, const char* end) {   // the next character, marks skipped; 0 = none
-    while (s < end && *s) {
-        uint32_t c = utf8_next(&s);
-        if (!ar_mark(c)) return c;
-    }
-    return 0;
-}
-
-// The form of letter cp (which started at `at`; *s is past it) among the text that began at `begin`: isolated,
-// final, initial or medial; lam followed by alef becomes one ligature (*s then moves past the alef).
-static uint32_t arabic_shape(uint32_t cp, const char* begin, const char* at, const char** s, const char* end) {
-    const uint16_t* r = ar_letter(cp);
-    if (!r) return cp;
-    int before = r[2] && ar_joins_next(cp_before(begin, at));
-    if (cp == 0x0644 && *s < end) {
-        const char* q = *s;
-        uint32_t n = utf8_next(&q);
-        for (size_t k = 0; k < sizeof(ar_lam_alef) / sizeof(ar_lam_alef[0]); k++)
-            if (ar_lam_alef[k][0] == n) {
-                *s = q;
-                return ar_lam_alef[k][before ? 2 : 1];
-            }
-    }
-    int after = r[3] && ar_joins_prev(cp_after(*s, end));
-    uint16_t f = before ? (after ? r[4] : r[2]) : (after ? r[3] : r[1]);
-    return f ? f : cp;
-}
-
-// Brackets read the other way round inside right-to-left text.
-static uint32_t mirror_cp(uint32_t c) {
-    static const uint32_t pairs[][2] = {{'(', ')'}, {')', '('}, {'[', ']'}, {']', '['}, {'{', '}'}, {'}', '{'},
-                                        {'<', '>'}, {'>', '<'}, {0xAB, 0xBB}, {0xBB, 0xAB}, {0x2039, 0x203A},
-                                        {0x203A, 0x2039}, {0xFD3E, 0xFD3F}, {0xFD3F, 0xFD3E}};
-    for (size_t i = 0; i < sizeof(pairs) / sizeof(pairs[0]); i++)
-        if (pairs[i][0] == c) return pairs[i][1];
-    return c;
-}
-
-// The next glyph of s[..end) (the text started at begin: Arabic letters look back to join); rtl: drawn right to
-// left (brackets mirrored). Returns 0 at the end, 2 for a mark that sits on the glyph before it, else 1.
-static int next_glyph(const Font* f, const char* begin, const char** s, const char* end, Glyph* g, int rtl) {
+static int next_glyph(const Font* f, const char** s, const char* end, Glyph* g) {
     while (*s < end && **s) {
-        const char* at = *s;
-        uint32_t cp = utf8_next(s), base = cp;
+        uint32_t cp = utf8_next(s);
         if (invisible(cp)) continue;
         if (cp == '\t') cp = ' ';
-        if (cp >= 0x0621 && cp <= 0x06FF) cp = arabic_shape(cp, begin, at, s, end);
-        if (rtl) cp = mirror_cp(cp);
-        int mark = ar_mark(base) || (base >= 0x0300 && base <= 0x036F);
-        for (int pass = 0; pass < 2; pass++, cp = base) {   // (a form no font has: the plain letter)
-            for (const Font* t = f; t; t = t->next) {
-                const char* after;
-                int k = match_sequence(t, cp, *s, end, &after);
-                if (k >= 0) {
-                    *s = after;
-                    glyph_at(t, (int)t->seq_glyph[k], g);
-                    if (t != f) g->by += (int)f->ascent - (int)t->ascent;   // keep the baseline of the asking font
-                    g->borrowed = t != f;
-                    return 1;
-                }
-                int i = find_glyph(t, cp);
-                if (i >= 0) {
-                    glyph_at(t, i, g);
-                    if (t != f) g->by += (int)f->ascent - (int)t->ascent;
-                    g->borrowed = t != f;
-                    return mark ? 2 : 1;
-                }
+        for (const Font* t = f; t; t = t->next) {
+            const char* after;
+            int k = match_sequence(t, cp, *s, end, &after);
+            if (k >= 0) {
+                *s = after;
+                glyph_at(t, (int)t->seq_glyph[k], g);
+                if (t != f) g->by += (int)f->ascent - (int)t->ascent;   // keep the baseline of the asking font
+                return 1;
             }
-            if (cp == base) break;
+            int i = find_cp(t, cp);
+            if (i >= 0) {
+                glyph_at(t, i, g);
+                if (t != f) g->by += (int)f->ascent - (int)t->ascent;
+                return 1;
+            }
         }
-        missing(base);
+        missing(cp);
         glyph_at(f, f->fallback, g);
-        g->borrowed = 0;
         return 1;
     }
     return 0;
 }
 
-static int has_rtl(const char* s, const char* e);
-static int bidi_draw(const Font* f, int x, int y, const char* s, const char* e, uint32_t rgb, int measure);
-
 static int text_width(const Font* f, const char* s, const char* end) {
     int w = 0;
-    const char* begin = s;
     Glyph g;
-    while (next_glyph(f, begin, &s, end, &g, 0)) w += g.adv;
+    while (next_glyph(f, &s, end, &g)) w += g.adv;
     return w;
 }
 static int str_width(const Font* f, const char* s) { return text_width(f, s, s + strlen(s)); }
 
-static void blit_glyph(const Glyph* g, int gx, int gy, uint32_t rgb) {
-    if (gx + g->w <= clip_x0 || gx >= clip_x1 || gy + g->h <= clip_y0 || gy >= clip_y1) return;
-    for (int j = 0; j < g->h; j++) {
-        int py = gy + j;
-        if (py < clip_y0 || py >= clip_y1) continue;
-        uint32_t* row = back + py * SCREEN_W;
-        for (int i = 0; i < g->w; i++) {
-            int px = gx + i;
-            if (px < clip_x0 || px >= clip_x1) continue;
-            if (g->kind == 1) {
-                const uint8_t* c = g->bm + (j * g->w + i) * 4;
-                if (c[3]) blend(row + px, (uint32_t)c[0] << 16 | c[1] << 8 | c[2], c[3] * text_alpha / 255);
-            } else {
-                uint32_t a = glyph_alpha(g, j * g->w + i);
-                if (a) blend(row + px, rgb, a * text_alpha / 255);
-            }
-        }
-    }
-}
-
-// Left to right, top-left at (x, y); returns the x after the text.
-static void blit_font_glyph(const Font* f, const Glyph* g, int gx, int gy, uint32_t rgb) {
-    blit_glyph(g, gx, gy, rgb);
-    if (f->embolden && g->borrowed && g->kind != 1) blit_glyph(g, gx + 1, gy, rgb);
-}
-
-static int draw_ltr(const Font* f, int x, int y, const char* s, const char* end, uint32_t rgb) {
+// Draws s[0..end) with its top-left at (x, y); returns the x after the text. Emoji keep their own colours.
+static int draw_text(const Font* f, int x, int y, const char* s, const char* end, uint32_t rgb) {
     Glyph g;
-    const char* begin = s;
-    while (next_glyph(f, begin, &s, end, &g, 0)) {
-        blit_font_glyph(f, &g, x + g.bx, y + g.by, rgb);
+    while (next_glyph(f, &s, end, &g)) {
+        int gx = x + g.bx, gy = y + g.by;
+        if (gx + g.w > clip_x0 && gx < clip_x1 && gy + g.h > clip_y0 && gy < clip_y1)
+            for (int j = 0; j < g.h; j++) {
+                int py = gy + j;
+                if (py < clip_y0 || py >= clip_y1) continue;
+                uint32_t* row = back + py * SCREEN_W;
+                for (int i = 0; i < g.w; i++) {
+                    int px = gx + i;
+                    if (px < clip_x0 || px >= clip_x1) continue;
+                    if (g.kind == 1) {
+                        const uint8_t* c = g.bm + (j * g.w + i) * 4;
+                        if (c[3]) blend(row + px, (uint32_t)c[0] << 16 | c[1] << 8 | c[2], c[3] * text_alpha / 255);
+                    } else {
+                        uint32_t a = g.bm[j * g.w + i];
+                        if (a) blend(row + px, rgb, a * text_alpha / 255);
+                    }
+                }
+            }
         x += g.adv;
     }
     return x;
 }
-
-// Right to left, from the right edge x1 (Arabic): each glyph goes to the left of the one before; a mark is centred
-// over its letter.
-static void draw_rtl(const Font* f, int x1, int y, const char* s, const char* end, uint32_t rgb) {
-    Glyph g;
-    const char* begin = s;
-    int x = x1, bx0 = x1, bw = 0;
-    for (int k; (k = next_glyph(f, begin, &s, end, &g, 1));) {
-        if (k == 2 && !g.adv) {
-            blit_font_glyph(f, &g, bx0 + (bw - g.w) / 2, y + g.by, rgb);
-            continue;
-        }
-        x -= g.adv;
-        bx0 = x + g.bx, bw = g.w;
-        blit_font_glyph(f, &g, bx0, y + g.by, rgb);
-    }
-}
-
-// Draws s[0..end) with its top-left at (x, y); returns the x after the text. Emoji keep their own colours.
-// Right-to-left text and the numbers and Latin words inside it are put in reading order first.
-static int draw_text(const Font* f, int x, int y, const char* s, const char* end, uint32_t rgb) {
-    if (has_rtl(s, end)) return bidi_draw(f, x, y, s, end, rgb, 0);
-    return draw_ltr(f, x, y, s, end, rgb);
-}
 static int draw_str(const Font* f, int x, int y, const char* s, uint32_t rgb) { return draw_text(f, x, y, s, s + strlen(s), rgb); }
 static void draw_center(const Font* f, int cx, int y, const char* s, uint32_t rgb) { draw_str(f, cx - str_width(f, s) / 2, y, s, rgb); }
-
-// ---- bidirectional text ------------------------------------------------------------------------------------------
-// The Unicode Bidirectional Algorithm (UAX #9) for one line, without explicit embeddings or isolates (those
-// characters count as nothing): character classes, the weak types (W1-W7), the neutrals (N1-N2), the levels
-// (I1-I2), trailing spaces at the paragraph's level (L1) and the reversal (L2). A paragraph's direction is that of
-// most of its letters, so "Python هي لغة برمجة" reads right to left.
-
-enum { BD_L, BD_R, BD_AL, BD_EN, BD_ES, BD_ET, BD_AN, BD_CS, BD_NSM, BD_BN, BD_B, BD_S, BD_WS, BD_ON };
-
-static int bidi_class(uint32_t c) {
-    if (c < 0x80) {
-        if (((c | 32) >= 'a' && (c | 32) <= 'z')) return BD_L;
-        if (c >= '0' && c <= '9') return BD_EN;
-        if (c == ' ') return BD_WS;
-        if (c == '\t') return BD_S;
-        if (c == '\n' || c == '\r') return BD_B;
-        if (c == '+' || c == '-') return BD_ES;
-        if (c == '#' || c == '$' || c == '%') return BD_ET;
-        if (c == ',' || c == '.' || c == '/' || c == ':') return BD_CS;
-        return c < 0x20 ? BD_BN : BD_ON;
-    }
-    if (c < 0xC0) {
-        if (c == 0xA0) return BD_CS;
-        if ((c >= 0xA2 && c <= 0xA5) || c == 0xB0 || c == 0xB1) return BD_ET;
-        if (c == 0xB2 || c == 0xB3 || c == 0xB9) return BD_EN;
-        if (c == 0xAA || c == 0xB5 || c == 0xBA) return BD_L;
-        return c == 0xAD ? BD_BN : BD_ON;
-    }
-    if (c == 0xD7 || c == 0xF7) return BD_ON;
-    if (c >= 0x0300 && c <= 0x036F) return BD_NSM;
-    if (c >= 0x0590 && c <= 0x05FF) return c >= 0x0591 && c <= 0x05BD ? BD_NSM : BD_R;   // Hebrew
-    if (c >= 0x07C0 && c <= 0x085F) return BD_R;   // N'Ko, Samaritan, Mandaic
-    if (c >= 0x0600 && c <= 0x08FF) {               // Arabic, Syriac, Thaana
-        if ((c >= 0x0660 && c <= 0x0669) || c == 0x066B || c == 0x066C || c <= 0x0605) return BD_AN;
-        if (c >= 0x06F0 && c <= 0x06F9) return BD_EN;   // (Persian digits count as European ones)
-        if (c == 0x060C) return BD_CS;
-        if (c == 0x066A) return BD_ET;
-        if (ar_mark(c) || (c >= 0x08D3 && c <= 0x08FF)) return BD_NSM;
-        return BD_AL;
-    }
-    if (c >= 0x2000 && c <= 0x206F) {
-        if (c <= 0x200A || c == 0x2028) return BD_WS;
-        if (c == 0x200E) return BD_L;
-        if (c == 0x200F) return BD_R;
-        if (c == 0x2029) return BD_B;
-        if (c == 0x202F) return BD_CS;
-        if (c >= 0x2030 && c <= 0x2034) return BD_ET;
-        if (c == 0x2044) return BD_CS;
-        if ((c >= 0x200B && c <= 0x200D) || (c >= 0x202A && c <= 0x202E) || c >= 0x2060) return BD_BN;
-        return BD_ON;
-    }
-    if ((c >= 0x2070 && c <= 0x2079 && c != 0x2071) || (c >= 0x2080 && c <= 0x2089)) return BD_EN;
-    if (c >= 0x20A0 && c <= 0x20CF) return BD_ET;
-    if (c >= 0x2100 && c <= 0x2BFF) return BD_ON;   // letterlike, arrows, maths, technical, shapes
-    if (c >= 0x2E00 && c <= 0x2E7F) return BD_ON;
-    if (c == 0x3000) return BD_WS;
-    if ((c >= 0x3001 && c <= 0x3004) || (c >= 0x3008 && c <= 0x3020) || c == 0x3030 || c == 0x30FB) return BD_ON;
-    if (c >= 0xFB1D && c <= 0xFB4F) return BD_R;
-    if (c >= 0xFB50 && c <= 0xFDFF) return BD_AL;
-    if (c >= 0xFE00 && c <= 0xFE0F) return BD_NSM;
-    if (c >= 0xFE70 && c <= 0xFEFE) return BD_AL;
-    if (c >= 0xFF10 && c <= 0xFF19) return BD_EN;
-    if ((c >= 0xFF01 && c <= 0xFF0F) || (c >= 0xFF1A && c <= 0xFF20) || (c >= 0xFF3B && c <= 0xFF40) ||
-        (c >= 0xFF5B && c <= 0xFF65))
-        return BD_ON;
-    if (c >= 0x1F000 && c <= 0x1FAFF) return BD_ON;   // emoji
-    return BD_L;
-}
-
-// Quick test: any right-to-left character in s[..e)? (UTF-8 lead bytes of U+0590-07FF, presentation forms FB1D-FEFF,
-// the right-to-left mark)
-static int has_rtl(const char* s, const char* e) {
-    for (const uint8_t* p = (const uint8_t*)s; p < (const uint8_t*)e && *p; p++) {
-        if (*p >= 0xD6 && *p <= 0xDF) return 1;
-        if (*p == 0xEF && p + 1 < (const uint8_t*)e && p[1] >= 0xAC && p[1] <= 0xBB) return 1;
-        if (*p == 0xE2 && p + 2 < (const uint8_t*)e && p[1] == 0x80 && p[2] == 0x8F) return 1;
-    }
-    return 0;
-}
-
-// The direction of a paragraph: right to left when most of its letters are (a tie: its first letter decides).
-static int para_rtl(const char* s, const char* e) {
-    if (!has_rtl(s, e)) return 0;
-    int l = 0, r = 0, first = -1;
-    while (s < e && *s) {
-        int k = bidi_class(utf8_next(&s));
-        if (k == BD_L) l++, first = first < 0 ? 0 : first;
-        else if (k == BD_R || k == BD_AL) r++, first = first < 0 ? 1 : first;
-    }
-    return r > l || (r == l && first == 1);
-}
-
-static int bd_neutral(int t) { return t == BD_B || t == BD_S || t == BD_WS || t == BD_ON; }
-
-// Levels of the n characters of classes t (changed in place) in a paragraph of direction rtl.
-static void bidi_levels(uint8_t* t, int n, int rtl, uint8_t* lv) {
-    static uint8_t orig[1024];
-    memcpy(orig, t, n);
-    const int sos = rtl ? BD_R : BD_L;
-    for (int i = 0; i < n; i++)   // W1: a mark takes the class of what it sits on
-        if (t[i] == BD_NSM || t[i] == BD_BN) t[i] = i ? t[i - 1] : sos;
-    for (int i = 0, last = sos; i < n; i++) {   // W2: numbers after Arabic letters are Arabic numbers; W3
-        if (t[i] == BD_L || t[i] == BD_R || t[i] == BD_AL) last = t[i];
-        else if (t[i] == BD_EN && last == BD_AL) t[i] = BD_AN;
-    }
-    for (int i = 0; i < n; i++)
-        if (t[i] == BD_AL) t[i] = BD_R;
-    for (int i = 1; i + 1 < n; i++) {   // W4: 1,5 / 1.5 / 10-20 stay one number
-        if (t[i] == BD_ES && t[i - 1] == BD_EN && t[i + 1] == BD_EN) t[i] = BD_EN;
-        else if (t[i] == BD_CS && t[i - 1] == t[i + 1] && (t[i - 1] == BD_EN || t[i - 1] == BD_AN)) t[i] = t[i - 1];
-    }
-    for (int i = 0; i < n;) {   // W5: $ and % next to a number are part of it
-        if (t[i] != BD_ET) {
-            i++;
-            continue;
-        }
-        int j = i;
-        while (j < n && t[j] == BD_ET) j++;
-        if ((i > 0 && t[i - 1] == BD_EN) || (j < n && t[j] == BD_EN)) memset(t + i, BD_EN, j - i);
-        i = j;
-    }
-    for (int i = 0; i < n; i++)   // W6
-        if (t[i] == BD_ES || t[i] == BD_ET || t[i] == BD_CS) t[i] = BD_ON;
-    for (int i = 0, last = sos; i < n; i++) {   // W7: numbers among Latin text are Latin
-        if (t[i] == BD_L || t[i] == BD_R) last = t[i];
-        else if (t[i] == BD_EN && last == BD_L) t[i] = BD_L;
-    }
-    for (int i = 0; i < n;) {   // N1, N2: spaces and punctuation take the direction around them
-        if (!bd_neutral(t[i])) {
-            i++;
-            continue;
-        }
-        int j = i;
-        while (j < n && bd_neutral(t[j])) j++;
-        int a = i ? (t[i - 1] == BD_L ? BD_L : BD_R) : sos, b = j < n ? (t[j] == BD_L ? BD_L : BD_R) : sos;
-        memset(t + i, a == b ? a : sos, j - i);
-        i = j;
-    }
-    for (int i = 0; i < n; i++)   // I1, I2
-        lv[i] = rtl ? (t[i] == BD_R ? 1 : 2) : (t[i] == BD_L ? 0 : t[i] == BD_R ? 1 : 2);
-    for (int i = n - 1; i >= 0 && (orig[i] == BD_WS || orig[i] == BD_S || orig[i] == BD_B || orig[i] == BD_BN); i--)
-        lv[i] = (uint8_t)rtl;   // L1
-}
-
-// A line split into pieces of one direction, in the order they are seen (left to right). The line is a list of
-// spans: text [s, e) or, with s == NULL, a gap of w pixels (the space between two layout runs).
-typedef struct {
-    const char* s, * e;
-    int w;
-} BSpan;
-typedef struct {
-    const char* s, * e;
-    int span, rtl;
-} BSeg;
-
-#define BIDI_MAX 1024
-
-static int bidi_split(const BSpan* sp, int n_sp, int rtl, BSeg* out, int max) {
-    static uint8_t t[BIDI_MAX], lv[BIDI_MAX];
-    static const char* at[BIDI_MAX + 1];
-    static int16_t of[BIDI_MAX];
-    int n = 0;
-    for (int k = 0; k < n_sp; k++) {
-        if (!sp[k].s) {
-            if (n == BIDI_MAX) return -1;
-            at[n] = NULL, of[n] = (int16_t)k, t[n++] = BD_WS;
-            continue;
-        }
-        for (const char* p = sp[k].s; p < sp[k].e && *p;) {
-            if (n == BIDI_MAX) return -1;
-            at[n] = p, of[n] = (int16_t)k;
-            t[n++] = (uint8_t)bidi_class(utf8_next(&p));
-        }
-    }
-    bidi_levels(t, n, rtl, lv);
-    // runs of one span and one level, in reading order
-    static BSeg seg[BIDI_MAX];
-    static uint8_t seg_lv[BIDI_MAX];
-    int ns = 0;
-    for (int i = 0; i < n;) {
-        int j = i + 1;
-        while (j < n && of[j] == of[i] && lv[j] == lv[i] && at[i]) j++;
-        BSeg* g = &seg[ns];
-        g->span = of[i], g->rtl = lv[i] & 1;
-        g->s = at[i];
-        g->e = !at[i] ? NULL : j < n && of[j] == of[i] ? at[j] : sp[of[i]].e;
-        seg_lv[ns++] = lv[i];
-        i = j;
-    }
-    if (ns > max) return -1;
-    // L2: from the highest level down to the lowest odd one, reverse every run at that level or higher
-    int order[BIDI_MAX], hi = 0, lo_odd = 255;
-    for (int i = 0; i < ns; i++) {
-        order[i] = i;
-        if (seg_lv[i] > hi) hi = seg_lv[i];
-        if ((seg_lv[i] & 1) && seg_lv[i] < lo_odd) lo_odd = seg_lv[i];
-    }
-    for (int l = hi; l >= lo_odd && l > 0; l--)
-        for (int i = 0; i < ns;) {
-            if (seg_lv[order[i]] < l) {
-                i++;
-                continue;
-            }
-            int j = i;
-            while (j < ns && seg_lv[order[j]] >= l) j++;
-            for (int a = i, b = j - 1; a < b; a++, b--) {
-                int x = order[a];
-                order[a] = order[b], order[b] = x;
-            }
-            i = j;
-        }
-    for (int i = 0; i < ns; i++) out[i] = seg[order[i]];
-    return ns;
-}
-
-// One line of mixed-direction text from (x, y): drawn (measure 0) or only measured. Returns the x after it.
-static int bidi_draw(const Font* f, int x, int y, const char* s, const char* e, uint32_t rgb, int measure) {
-    static BSeg seg[BIDI_MAX];
-    BSpan sp = {s, e, 0};
-    int n = bidi_split(&sp, 1, para_rtl(s, e), seg, BIDI_MAX);
-    if (n < 0) return measure ? x + text_width(f, s, e) : draw_ltr(f, x, y, s, e, rgb);
-    for (int i = 0; i < n; i++) {
-        int w = text_width(f, seg[i].s, seg[i].e);
-        if (!measure) {
-            if (seg[i].rtl) draw_rtl(f, x + w, y, seg[i].s, seg[i].e, rgb);
-            else draw_ltr(f, x, y, seg[i].s, seg[i].e, rgb);
-        }
-        x += w;
-    }
-    return x;
-}
 
 // ---- images (PIMG from pc/make_brand.py) ----------------------------------------------------------------------
 
@@ -1031,10 +750,6 @@ int ui_init(const char* dir) {
         }
     }
     font_bold.next = font_italic.next = font_small.next = font_big.next = mono.next = &font;
-    font_head = font_big;   // the headings' copy: without the interface's own characters (UI_VAR, at the end)
-    while (font_head.n && font_head.cps[font_head.n - 1] >= UI_VAR) font_head.n--;
-    font_head.has_ui = 0;
-    font_bold.embolden = font_head.embolden = 1;
     snprintf(path, sizeof(path), "%s/logo.bin", dir);
     if (images_load(path)) say("logo.bin missing");
     make_background();
@@ -1203,9 +918,7 @@ static char* format_tables(const char* text) {
     return out;
 }
 
-// One row (or rule) of a table from x; a right-to-left table (rtl) starts at x_right with its first column and
-// aligns its cells to the right.
-static void draw_table_line(const char* a, const char* b, int x, int top, int h, int header, int rtl, int x_right) {
+static void draw_table_line(const char* a, const char* b, int x, int top, int h, int header) {
     char kind = a[1];
     int widths[MAX_COLS], n = 0;
     const char* p = a + 2;
@@ -1215,23 +928,20 @@ static void draw_table_line(const char* a, const char* b, int x, int top, int h,
         p++;
     }
     p++;
-    int xs[MAX_COLS + 1];   // column edges, left to right on screen
-    xs[0] = 0;
+    int xs[MAX_COLS + 1];
+    xs[0] = x;
     for (int i = 0; i < n; i++) xs[i + 1] = xs[i] + widths[i] + 2 * CELL_PAD;
-    int left = rtl ? x_right - xs[n] - 2 : x;
     if (kind != 'R') {
-        fill(left, top, xs[n] + 2, 2, kind == 'M' ? C_ACCENT : C_LINE_HI);
+        fill(xs[0], top, xs[n] - xs[0] + 2, 2, kind == 'M' ? C_ACCENT : C_LINE_HI);
         return;
     }
-    if (header) fill(left, top, xs[n], h, 0x12274C);
-    for (int i = 0; i <= n; i++) fill(left + xs[i], top, 2, h, C_LINE_HI);
+    if (header) fill(xs[0], top, xs[n] - xs[0], h, 0x12274C);
+    for (int i = 0; i <= n; i++) fill(xs[i], top, 2, h, C_LINE_HI);
     const Font* f = header ? &font_bold : &font;
     for (int i = 0; i < n && p <= b; i++) {
         const char* e = p;
         while (e < b && *e != '\x02') e++;
-        int c = rtl ? n - 1 - i : i, tx = left + xs[c] + CELL_PAD;
-        if (rtl) tx += widths[c] - text_width(f, p, e);
-        draw_text(f, tx, top + (h - f->line) / 2, p, e, header ? 0xFFFFFF : C_TEXT);
+        draw_text(f, xs[i] + CELL_PAD, top + (h - f->line) / 2, p, e, header ? 0xFFFFFF : C_TEXT);
         p = e + 1;
     }
 }
@@ -1256,13 +966,11 @@ typedef struct {
     int x, w;
     const char* s, * e;
     uint8_t style;
-    uint8_t rtl;               // right-to-left text, drawn from x + w leftwards
 } Run;
 
 typedef struct {
     int y, h, base;            // top, height, baseline offset
     uint8_t deco, quote, header;
-    uint8_t rtl;               // a right-to-left paragraph: against the right edge, quote bars on that side
     int run0, nrun;
     const char* a, * b;        // table row text
 } Line;
@@ -1279,7 +987,6 @@ struct Layout {
     int n_runs, cap_runs;
     int height, max_w;
     int line_start;            // first run of the line being built
-    int para_rtl;              // the paragraph being laid out reads right to left
 };
 
 #define TEXT_LINE_H (font.line + 7)
@@ -1306,48 +1013,7 @@ static void add_run(Layout* L, const Font* f, uint32_t color, int x, int w, cons
         L->runs = realloc(L->runs, L->cap_runs * sizeof(Run));
     }
     Run* r = &L->runs[L->n_runs++];
-    r->f = f, r->color = color, r->x = x, r->w = w, r->s = s, r->e = e, r->style = (uint8_t)style, r->rtl = 0;
-}
-
-// A line with right-to-left text in reading order: its runs are cut where the direction changes and placed left to
-// right as they are seen (bidi_split). A right-to-left paragraph lies against the right edge, the indent of lists
-// and quotes on that side.
-static void layout_bidi(Layout* L, Line* ln) {
-    int n = ln->nrun, any = ln->rtl;
-    for (int k = 0; k < n && !any; k++) any = has_rtl(L->runs[ln->run0 + k].s, L->runs[ln->run0 + k].e);
-    if (!any || !n || n > 256) return;
-    static Run old[256];
-    static BSpan sp[512];
-    static BSeg seg[BIDI_MAX];
-    static int run_of[512], wseg[BIDI_MAX];
-    memcpy(old, L->runs + ln->run0, n * sizeof(Run));
-    int ns = 0;
-    for (int k = 0; k < n; k++) {
-        int gap = k ? old[k].x - (old[k - 1].x + old[k - 1].w) : 0;
-        if (gap > 0) run_of[ns] = -1, sp[ns++] = (BSpan){NULL, NULL, gap};
-        run_of[ns] = k, sp[ns++] = (BSpan){old[k].s, old[k].e, 0};
-    }
-    int m = bidi_split(sp, ns, ln->rtl, seg, BIDI_MAX), total = 0;
-    if (m < 0) return;
-    for (int i = 0; i < m; i++) {
-        wseg[i] = seg[i].s ? text_width(old[run_of[seg[i].span]].f, seg[i].s, seg[i].e) : sp[seg[i].span].w;
-        total += wseg[i];
-    }
-    if (ln->run0 + m > L->cap_runs) {
-        L->cap_runs = ln->run0 + m + 64;
-        L->runs = realloc(L->runs, L->cap_runs * sizeof(Run));
-    }
-    int x = ln->rtl ? L->width - old[0].x - total : old[0].x;
-    L->n_runs = ln->run0;
-    for (int i = 0; i < m; i++) {
-        if (seg[i].s) {
-            Run* o = &L->runs[L->n_runs++];
-            *o = old[run_of[seg[i].span]];
-            o->x = x, o->w = wseg[i], o->s = seg[i].s, o->e = seg[i].e, o->rtl = (uint8_t)seg[i].rtl;
-        }
-        x += wseg[i];
-    }
-    ln->nrun = L->n_runs - ln->run0;
+    r->f = f, r->color = color, r->x = x, r->w = w, r->s = s, r->e = e, r->style = (uint8_t)style;
 }
 
 static Line* end_line(Layout* L, int h, int base, int deco, int quote) {
@@ -1359,56 +1025,28 @@ static Line* end_line(Layout* L, int h, int base, int deco, int quote) {
     memset(ln, 0, sizeof(*ln));
     ln->y = L->height, ln->h = h, ln->base = base, ln->deco = (uint8_t)deco, ln->quote = (uint8_t)quote;
     ln->run0 = L->line_start, ln->nrun = L->n_runs - L->line_start;
-    ln->rtl = (uint8_t)(L->para_rtl && deco == DECO_NONE);
-    if (deco == DECO_NONE || deco == DECO_CODE) layout_bidi(L, ln);
-    for (int i = ln->run0; i < L->n_runs; i++) {   // (a right-to-left line ends at the right edge: its width
-        int w = ln->rtl ? L->width - L->runs[i].x : L->runs[i].x + L->runs[i].w;   // counts from its left end)
-        if (w > L->max_w) L->max_w = w;
-    }
+    for (int i = ln->run0; i < L->n_runs; i++)
+        if (L->runs[i].x + L->runs[i].w > L->max_w) L->max_w = L->runs[i].x + L->runs[i].w;
     L->height += h;
     L->line_start = L->n_runs;
     return ln;
 }
 
-// space: a space comes before it; brk: a line may end before it without a space (where Chinese or Japanese text
-// starts or ends); cjk: Chinese or Japanese text, which may break after any character.
 typedef struct {
     const char* s, * e;
-    uint8_t style, space, brk, cjk;
+    uint8_t style, space;
 } Piece;
 
 #define MAX_PIECES 2048
 static Piece pieces[MAX_PIECES];
-static int n_pieces, piece_brk, piece_cjk;
+static int n_pieces;
 
 static void piece(const char* s, const char* e, int style, int* space) {
     if (e <= s || n_pieces == MAX_PIECES) return;
     pieces[n_pieces].s = s, pieces[n_pieces].e = e, pieces[n_pieces].style = (uint8_t)style;
     pieces[n_pieces].space = (uint8_t)*space;
-    pieces[n_pieces].brk = (uint8_t)piece_brk, pieces[n_pieces].cjk = (uint8_t)piece_cjk;
     n_pieces++;
-    *space = 0, piece_brk = 0;
-}
-
-// Chinese and Japanese characters (ideographs, kana, their punctuation, full-width forms): text without spaces,
-// where a line may end after any character. (Korean puts spaces between words.)
-static int cjk_break(uint32_t c) {
-    return (c >= 0x2E80 && c <= 0x312F) || (c >= 0x31F0 && c <= 0x9FFF) || (c >= 0xF900 && c <= 0xFAFF) ||
-           (c >= 0xFE30 && c <= 0xFE4F) || (c >= 0xFF00 && c <= 0xFFEF) || (c >= 0x20000 && c <= 0x3FFFF);
-}
-
-// Closing punctuation, small kana and the prolonged sound mark do not start a line: they stay at the end of the one
-// before, even a little past its edge.
-static int no_line_start(uint32_t c) {
-    static const uint16_t set[] = {')', ']', '}', '.', ',', '!', '?', ':', ';', '%', 0x2019, 0x201D, 0x2025, 0x2026,
-                                   0x3001, 0x3002, 0x3005, 0x3009, 0x300B, 0x300D, 0x300F, 0x3011, 0x3015, 0x3017,
-                                   0x3019, 0x3041, 0x3043, 0x3045, 0x3047, 0x3049, 0x3063, 0x3083, 0x3085, 0x3087,
-                                   0x308E, 0x30A1, 0x30A3, 0x30A5, 0x30A7, 0x30A9, 0x30C3, 0x30E3, 0x30E5, 0x30E7,
-                                   0x30EE, 0x30F5, 0x30F6, 0x30FB, 0x30FC, 0xFF01, 0xFF09, 0xFF0C, 0xFF0E, 0xFF1A,
-                                   0xFF1B, 0xFF1F, 0xFF3D, 0xFF5D};
-    for (size_t i = 0; i < sizeof(set) / sizeof(set[0]); i++)
-        if (set[i] == c) return 1;
-    return 0;
+    *space = 0;
 }
 
 static int is_alnum(char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (uint8_t)c >= 0x80; }
@@ -1425,23 +1063,12 @@ static int has_closer(const char* p, const char* b, char c) {
 
 // Splits a[..b) into pieces at spaces and style markers (markers are dropped).
 static void parse_inline(const char* a, const char* b, int plain) {
-    n_pieces = 0, piece_brk = 0, piece_cjk = 0;
+    n_pieces = 0;
     int style = 0, space = 0;
     const char* cur = a;
     const char* p = a;
     while (p < b) {
         char c = *p;
-        if (((uint8_t)c & 0xC0) != 0x80) {   // a character starts: into or out of Chinese / Japanese text?
-            int k = 0;
-            if ((uint8_t)c >= 0xE2) {
-                const char* q = p;
-                k = cjk_break(utf8_next(&q));
-            }
-            if (k != piece_cjk) {
-                piece(cur, p, style, &space);
-                cur = p, piece_cjk = k, piece_brk = 1;
-            }
-        }
         if (c == ' ') {
             piece(cur, p, style, &space);
             while (p < b && *p == ' ') p++;
@@ -1539,7 +1166,7 @@ static void parse_inline(const char* a, const char* b, int plain) {
 
 static const Font* style_font(int st, int heading) {
     if (st & ST_CODE) return &mono;
-    if (heading) return heading <= 2 ? &font_head : &font_bold;
+    if (heading) return heading <= 2 ? &font_big : &font_bold;
     if (st & ST_BOLD) return &font_bold;
     if (st & ST_ITALIC) return &font_italic;
     return &font;
@@ -1566,33 +1193,11 @@ static void flow(Layout* L, int x_first, int x_cont, int right, int heading, int
     for (int i = 0; i < n_pieces; i++) pw[i] = text_width(style_font(pieces[i].style, heading), pieces[i].s, pieces[i].e);
     for (int i = 0; i < n_pieces;) {
         int j = i + 1;
-        while (j < n_pieces && !pieces[j].space && !pieces[j].brk) j++;
+        while (j < n_pieces && !pieces[j].space) j++;
         int ww = 0;
         for (int k = i; k < j; k++) ww += pw[k];
         int sp = has && pieces[i].space ? base_font->space : 0;
-        if (pieces[i].cjk) {   // Chinese / Japanese: the line may end after any character
-            x += sp;
-            for (int k = i; k < j; k++) {
-                const Font* f = style_font(pieces[k].style, heading);
-                uint32_t col = style_color(L->pal, pieces[k].style, heading, quote);
-                for (const char* c = pieces[k].s; c < pieces[k].e;) {
-                    const char* nx = c;
-                    uint32_t cp = utf8_next(&nx);
-                    int cw = text_width(f, c, nx);
-                    if (has && x + cw > right && !no_line_start(cp)) {
-                        end_line(L, lh, base, DECO_NONE, quote);
-                        x = x_cont, has = 0;
-                    }
-                    add_run(L, f, col, x, cw, c, nx, pieces[k].style);
-                    x += cw, has = 1, c = nx;
-                }
-            }
-            i = j;
-            continue;
-        }
-        int glued = has && !pieces[i].space && pieces[i].brk;   // right after Chinese / Japanese text
-        const char* q = pieces[i].s;
-        if (has && x + sp + ww > right && !(glued && no_line_start(utf8_next(&q)))) {
+        if (has && x + sp + ww > right) {
             end_line(L, lh, base, DECO_NONE, quote);
             x = x_cont, has = 0, sp = 0;
         }
@@ -1643,7 +1248,7 @@ static void layout_build(Layout* L, const char* src, size_t len, int width, cons
     L->src_len = len, L->width = width, L->pal = pal, L->plain = plain;
     L->text = plain ? strdup(src) : format_tables(src);
     L->n_lines = L->n_runs = L->height = L->max_w = L->line_start = 0;
-    int in_code = 0, blank = 0, header = 0, table_rtl = 0;
+    int in_code = 0, blank = 0, header = 0;
     const int code_pad = 24;
     for (const char* s = L->text; *s;) {
         const char* nl = strchr(s, '\n');
@@ -1651,9 +1256,7 @@ static void layout_build(Layout* L, const char* src, size_t len, int width, cons
         const char* t = s;
         int spaces = 0;
         while (t < e && (*t == ' ' || *t == '\t')) spaces += *t == '\t' ? 4 : 1, t++;
-        L->para_rtl = 0;
         if (plain) {
-            L->para_rtl = para_rtl(s, e);
             parse_inline(s, e, 1);
             flow(L, 0, 0, width, 0, 0, NULL);
         } else if (is_fence(t, e)) {
@@ -1687,14 +1290,10 @@ static void layout_build(Layout* L, const char* src, size_t len, int width, cons
             if (e > run_s) add_run(L, &mono, 0xC7E2FF, run_x, x - run_x, run_s, e, 0);
             end_line(L, lh, 2 + mono.ascent, DECO_CODE, 0);
         } else if (*s == '\x01') {   // table row
-            if (s[1] == 'T') {   // a new table: right to left if most of its text is
-                header = 1;
-                const char* end = strstr(s, "\x01" "B");
-                table_rtl = para_rtl(s, end ? end : s + strlen(s));
-            }
+            if (s[1] == 'T') header = 1;
             if (s[1] == 'M') header = 0;
             Line* ln = end_line(L, s[1] == 'R' ? font.line + 16 : 2, 0, DECO_TABLE, 0);
-            ln->a = s, ln->b = e, ln->header = (uint8_t)(header && s[1] == 'R'), ln->rtl = (uint8_t)table_rtl;
+            ln->a = s, ln->b = e, ln->header = (uint8_t)(header && s[1] == 'R');
             if (s[1] == 'B') L->height += 10;
             blank = 0;
         } else if (t == e || (e - t == 1 && *t == '\r')) {   // blank line: paragraph gap
@@ -1746,7 +1345,6 @@ static void layout_build(Layout* L, const char* src, size_t len, int width, cons
                     has_marker = 1;
                 }
             }
-            L->para_rtl = para_rtl(t, e);
             parse_inline(t, e, 0);
             flow(L, x0, x0, width, heading, quote, has_marker ? &marker : NULL);
         }
@@ -1764,9 +1362,7 @@ static Layout* layout_get(Layout** pl, const char* text, size_t len, int width, 
     return L;
 }
 
-// Draws the layout with its top-left at (ox, oy); right-to-left lines end at the right edge of a box box_w wide
-// (L->width: the whole width; L->max_w: as wide as the text, as in a speech bubble).
-static void draw_layout_w(const Layout* L, int ox, int oy, int box_w) {
+static void draw_layout(const Layout* L, int ox, int oy) {
     for (int i = 0; i < L->n_lines; i++) {
         const Line* ln = &L->lines[i];
         int ly = oy + ln->y;
@@ -1780,35 +1376,29 @@ static void draw_layout_w(const Layout* L, int ox, int oy, int box_w) {
         }
         if (ly + ln->h < clip_y0) continue;
         if (ln->deco == DECO_HR) fill(ox, ly + ln->h / 2, L->width, 2, C_LINE_HI);
-        if (ln->deco == DECO_TABLE) draw_table_line(ln->a, ln->b, ox, ly, ln->h, ln->header, ln->rtl, ox + box_w);
-        int lx = ln->rtl ? ox + box_w - L->width : ox;
-        for (int q = 0; q < ln->quote; q++)
-            rrect(ln->rtl ? ox + box_w - q * QUOTE_INDENT - 8 : ox + q * QUOTE_INDENT + 4, ly, 4, ln->h, 2, C_ACCENT, 255);
+        if (ln->deco == DECO_TABLE) draw_table_line(ln->a, ln->b, ox, ly, ln->h, ln->header);
+        for (int q = 0; q < ln->quote; q++) rrect(ox + q * QUOTE_INDENT + 4, ly, 4, ln->h, 2, C_ACCENT, 255);
         for (int k = 0; k < ln->nrun; k++) {
             const Run* r = &L->runs[ln->run0 + k];
-            int ty = ly + ln->base - r->f->ascent, rx = lx + r->x;
-            if (r->style & ST_CODE) rrect(rx - 5, ly + ln->base - mono.ascent - 4, r->w + 10, mono.line + 6, 8,
+            int ty = ly + ln->base - r->f->ascent;
+            if (r->style & ST_CODE) rrect(ox + r->x - 5, ly + ln->base - mono.ascent - 4, r->w + 10, mono.line + 6, 8,
                                           L->pal->code_bg, 255);
-            if (r->rtl) draw_rtl(r->f, rx + r->w, ty, r->s, r->e, r->color);
-            else draw_ltr(r->f, rx, ty, r->s, r->e, r->color);
-            if (r->style & ST_STRIKE) fill(rx, ly + ln->base - r->f->ascent / 3, r->w, 2, r->color);
-            if (r->style & ST_LINK) fill(rx, ly + ln->base + 3, r->w, 1, r->color);
+            draw_text(r->f, ox + r->x, ty, r->s, r->e, r->color);
+            if (r->style & ST_STRIKE) fill(ox + r->x, ly + ln->base - r->f->ascent / 3, r->w, 2, r->color);
+            if (r->style & ST_LINK) fill(ox + r->x, ly + ln->base + 3, r->w, 1, r->color);
         }
     }
 }
-static void draw_layout(const Layout* L, int ox, int oy) { draw_layout_w(L, ox, oy, L->width); }
 
-// Where the text ends (for the caret): the end of the last line (its left end if it reads right to left: *rtl),
-// and that line's top and height.
-static void layout_end(const Layout* L, int* x, int* y, int* h, int* rtl) {
-    *x = 0, *y = 0, *h = TEXT_LINE_H, *rtl = 0;
+// Where the text ends (for the caret): x after the last run of the last line, and that line's top and height.
+static void layout_end(const Layout* L, int* x, int* y, int* h) {
+    *x = 0, *y = 0, *h = TEXT_LINE_H;
     if (!L->n_lines) return;
     const Line* ln = &L->lines[L->n_lines - 1];
-    *y = ln->y, *h = ln->h, *rtl = ln->rtl;
-    if (ln->rtl) *x = L->width;
-    for (int k = 0; k < ln->nrun; k++) {
-        const Run* r = &L->runs[ln->run0 + k];
-        if (ln->rtl ? r->x < *x : r->x + r->w > *x) *x = ln->rtl ? r->x : r->x + r->w;
+    *y = ln->y, *h = ln->h;
+    if (ln->nrun) {
+        const Run* r = &L->runs[ln->run0 + ln->nrun - 1];
+        *x = r->x + r->w;
     }
 }
 
@@ -1961,18 +1551,16 @@ static void draw_thinking(const ChatView* v, int x, int y, int w) {
     static Layout* lay;
     static char tail[THINK_TAIL + 3200];
     int cy = y + 24;   // level with the logo next to the reply
-    int r = lang_rtl(ui_lang);   // (right to left: the label on the right, the counts on the left)
     float a = 0.5f + 0.5f * sinf((float)v->time * 6.0f);
-    const char* label = tr(S_THINKING);
-    circle(r ? x + w - 8 : x + 8, cy, 7, 0, C_ACCENT_HI, (int)(110 + 145 * a));
-    draw_str(&font, r ? x + w - 28 - str_width(&font, label) : x + 28, cy - font.line / 2, label, C_ACCENT_HI);
+    circle(x + 8, cy, 7, 0, C_ACCENT_HI, (int)(110 + 145 * a));
+    draw_str(&font, x + 28, cy - font.line / 2, tr(S_THINKING), C_ACCENT_HI);
     char s[64];
     snprintf(s, sizeof(s), "%d / %d  ·  %d s", v->think_n, v->think_cap, (int)v->think_s);
-    draw_str(&font_small, r ? x : x + w - str_width(&font_small, s), cy - font_small.line / 2, s, C_TEXT_MUTED);
+    draw_str(&font_small, x + w - str_width(&font_small, s), cy - font_small.line / 2, s, C_TEXT_MUTED);
     int by = y + THINK_HEAD_H - 4, n = v->think_n < v->think_cap ? v->think_n : v->think_cap;
     rrect(x, by, w, 4, 2, 0x1B3156, 255);
     int fw = v->think_cap > 0 ? (int)((long long)w * n / v->think_cap) : 0;
-    if (fw > 0) rrect(r ? x + w - (fw < 4 ? 4 : fw) : x, by, fw < 4 ? 4 : fw, 4, 2, C_ACCENT_HI, 255);
+    if (fw > 0) rrect(x, by, fw < 4 ? 4 : fw, 4, 2, C_ACCENT_HI, 255);
     int py = y + THINK_HEAD_H + 8, ph = 2 * THINK_PAD + THINK_LINES * TEXT_LINE_H - 8;
     rrect(x, py, w, ph, 18, C_SURFACE, 210);
     rrect_line(x, py, w, ph, 18, 1, C_LINE, 255);
@@ -2018,13 +1606,12 @@ static void draw_thinking(const ChatView* v, int x, int y, int w) {
     }
 }
 
-static void draw_thought(const Msg* m, int x, int y, int w) {   // (right to left: on the right of the reply)
+static void draw_thought(const Msg* m, int x, int y) {
     char s[96];
     int n = snprintf(s, sizeof(s), tr(S_THOUGHT), (int)(m->think_s + 0.5f), m->think_n);
     if (m->think_cut && n > 0 && n < (int)sizeof(s)) snprintf(s + n, sizeof(s) - n, " · %s", tr(S_THINK_CUT));
-    int r = lang_rtl(ui_lang);
-    circle(r ? x + w - 6 : x + 6, y + font_small.line / 2, 5, 0, C_ACCENT, 255);
-    draw_str(&font_small, r ? x + w - 20 - str_width(&font_small, s) : x + 20, y, s, C_TEXT_MUTED);
+    circle(x + 6, y + font_small.line / 2, 5, 0, C_ACCENT, 255);
+    draw_str(&font_small, x + 20, y, s, C_TEXT_MUTED);
 }
 
 static int msg_height(Msg* m, int typing) {
@@ -2110,12 +1697,12 @@ void draw_chat(ChatView* v) {
                     int bx = COL_X + COL_W - bw;
                     int rad[4] = {26, 26, 8, 26};
                     rrect4(bx, y, bw, h, rad, 0, C_USER, 255);
-                    draw_layout_w(L, bx + BUB_PAD_X, y + BUB_PAD_Y, L->max_w);
+                    draw_layout(L, bx + BUB_PAD_X, y + BUB_PAD_Y);
                 } else if (m->who == MSG_NOTE) {
                     int nx = (SCREEN_W - L->max_w) / 2;
                     fill(COL_X + 120, y + h / 2, nx - COL_X - 150, 1, C_LINE);
                     fill(nx + L->max_w + 30, y + h / 2, COL_X + COL_W - 120 - nx - L->max_w - 30, 1, C_LINE);
-                    draw_layout_w(L, nx, y + 4, L->max_w);
+                    draw_layout(L, nx, y + 4);
                 } else {
                     circle(COL_X + 28, y + 28, 28, 0, 0x10244A, 255);
                     circle(COL_X + 28, y + 28, 28, 1.2f, C_LINE_HI, 255);
@@ -2126,7 +1713,7 @@ void draw_chat(ChatView* v) {
                         y += h + MSG_GAP;
                         continue;
                     }
-                    if (m->think_n) draw_thought(m, tx, ty, COL_W - AI_INDENT), ty += think_label_h();
+                    if (m->think_n) draw_thought(m, tx, ty), ty += think_label_h();
                     draw_layout(L, tx, ty);
                     if (typing_last && i == n_msgs - 1) {
                         if (!L->n_lines || !L->n_runs) {   // nothing written yet: three bouncing dots
@@ -2136,10 +1723,10 @@ void draw_chat(ChatView* v) {
                                 circle(tx + 10 + k * 26, ty + 24 - 5 * (0.5f + 0.5f * sinf(ph)), 7, 0, C_ACCENT_HI, (int)(255 * a));
                             }
                         } else {
-                            int ex, ey, eh, er;
-                            layout_end(L, &ex, &ey, &eh, &er);
+                            int ex, ey, eh;
+                            layout_end(L, &ex, &ey, &eh);
                             float a = 0.5f + 0.5f * sinf((float)v->time * 7.0f);
-                            circle(tx + ex + (er ? -14 : 14), ty + ey + eh / 2, 7, 0, C_ACCENT_HI, (int)(90 + 165 * a));
+                            circle(tx + ex + 14, ty + ey + eh / 2, 7, 0, C_ACCENT_HI, (int)(90 + 165 * a));
                         }
                     }
                 }
@@ -2217,7 +1804,7 @@ void draw_loading(float frac, const char* what) {
     char line_[160];
     snprintf(line_, sizeof(line_), "%s…  %d %%", what, (int)(clamp01(frac) * 100));
     draw_center(&font_small, cx, y + 30, line_, C_TEXT_DIM);
-    draw_center(&font_small, cx, SCREEN_H - 90, "Qwen3.5  ·  Parakeet  ·  Nemotron  ·  Chatterbox", C_TEXT_MUTED);
+    draw_center(&font_small, cx, SCREEN_H - 90, "Qwen3.5  ·  Parakeet  ·  Chatterbox", C_TEXT_MUTED);
 }
 
 void draw_error(const char* what) {
@@ -2227,61 +1814,8 @@ void draw_error(const char* what) {
     draw_center(&font_big, cx, y, tr(S_ERROR_TITLE), C_RED);
     static Layout* L;
     Layout* l = layout_get(&L, what, strlen(what), 1200, &PAL_AI, 1);
-    draw_layout_w(l, cx - l->max_w / 2, y + font_big.line + 20, l->max_w);
+    draw_layout(l, cx - l->max_w / 2, y + font_big.line + 20);
     draw_center(&font_small, cx, y + font_big.line + 40 + l->height, tr(S_ERROR_HINT), C_TEXT_MUTED);
-}
-
-// ---- the models folder: which weights the model starts with (main.c model_choose) --------------------------------
-
-#define MODEL_ROW_W 920
-#define MODEL_ROW_H 96
-#define MODEL_ROW_GAP 14
-#define MODEL_ROWS 4   // rows on the screen at once; the list scrolls with the selection
-
-void draw_models(const char* const* names, const char* const* notes, int n, int sel) {
-    draw_background();
-    brand_block(150);
-    int cx = SCREEN_W / 2, y = 150 + logo_l.h + 28 + font_big.line + 30;
-    draw_center(&font, cx, y, tr(S_MODEL_TITLE), C_TEXT_DIM);
-    y += font.line + 26;
-    int top = sel < MODEL_ROWS ? 0 : sel - MODEL_ROWS + 1, x = cx - MODEL_ROW_W / 2;
-    for (int i = top; i < n && i < top + MODEL_ROWS; i++, y += MODEL_ROW_H + MODEL_ROW_GAP) {
-        int on = i == sel, cy = y + MODEL_ROW_H / 2;
-        rrect(x, y, MODEL_ROW_W, MODEL_ROW_H, 24, on ? C_SURFACE_HI : C_SURFACE, 255);
-        rrect_line(x, y, MODEL_ROW_W, MODEL_ROW_H, 24, on ? 2 : 1, on ? C_ACCENT_HI : C_LINE_HI, 255);
-        circle(x + 48, cy, 13, 2.0f, on ? C_ACCENT_HI : C_LINE_HI, 255);
-        if (on) circle(x + 48, cy, 7, 0, C_ACCENT_HI, 255);
-        set_clip(x + 84, y, x + MODEL_ROW_W - 28, y + MODEL_ROW_H);
-        int ty = y + (MODEL_ROW_H - font.line - font_small.line) / 2;
-        draw_str(&font, x + 84, ty, names[i], on ? 0xFFFFFF : C_TEXT);
-        draw_str(&font_small, x + 84, ty + font.line, notes[i], on ? C_TEXT_DIM : C_TEXT_MUTED);
-        no_clip();
-    }
-    char where[24];
-    snprintf(where, sizeof(where), "%d / %d", sel + 1, n);
-    const Hint h[] = {{BTN_UPDOWN, S_MODEL_SELECT}, {BTN_CROSS, S_MODEL_START}};
-    draw_footer(h, 2, n > MODEL_ROWS ? where : NULL);
-}
-
-void draw_model_bad(const char* name, const char* detail) {
-    draw_background();
-    brand_block(180);
-    int cx = SCREEN_W / 2, y = 180 + logo_l.h + 28 + font_big.line + 56;
-    draw_center(&font_big, cx, y, tr(S_MODEL_BAD_TITLE), 0xF2A65A);
-    y += font_big.line + 14;
-    draw_center(&font, cx, y, name, 0xFFFFFF);
-    y += font.line + 22;
-    static Layout* L;
-    Layout* l = layout_get(&L, tr(S_MODEL_BAD), strlen(tr(S_MODEL_BAD)), 1200, &PAL_AI, 1);
-    draw_layout_w(l, cx - l->max_w / 2, y, l->max_w);
-    y += l->height + 16;
-    if (detail && *detail) {
-        draw_center(&font_small, cx, y, detail, C_TEXT_MUTED);
-        y += font_small.line + 10;
-    }
-    draw_center(&font_small, cx, y, tr(S_MODEL_FALLBACK), C_TEXT_DIM);
-    const Hint h[] = {{BTN_CROSS, S_MODEL_CONTINUE}};
-    draw_footer(h, 1, NULL);
 }
 
 // ---- on-screen keyboard ----------------------------------------------------------------------------------------
@@ -2289,8 +1823,7 @@ void draw_model_bad(const char* name, const char* detail) {
 #define KB_ROWS 6
 #define KB_COLS 12
 // Special keys: ⇧ shift, ⌫ delete, ␣ space, ⏎ send, [emoji], [lang] (next layout); dead keys (accents) are
-// listed per layout in kb_dead; the kana keys ゛ ゜ 小 change the kana before them. A key repeated in neighbouring
-// columns is one wide key.
+// listed per layout in kb_dead. A key repeated in neighbouring columns is one wide key.
 static const char* kb_layouts[N_KB_LAYOUTS][KB_ROWS][KB_COLS] = {
     [KB_ES] = {{"1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "¿", "?"},
                {"q", "w", "e", "r", "t", "y", "u", "i", "o", "p", "´", "⌫"},
@@ -2316,43 +1849,9 @@ static const char* kb_layouts[N_KB_LAYOUTS][KB_ROWS][KB_COLS] = {
                {"⇧", "я", "ч", "с", "м", "и", "т", "ь", "б", "ю", "ё", ","},
                {".", ":", ";", "-", "_", "+", "=", "*", "/", "(", ")", "\""},
                {"[lang]", "@", "#", "%", "'", "␣", "␣", "␣", "[emoji]", "[emoji]", "⏎", "⏎"}},
-    [KB_FR] = {{"1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "?", "!"},   // AZERTY
-               {"a", "z", "e", "r", "t", "y", "u", "i", "o", "p", "^", "⌫"},
-               {"q", "s", "d", "f", "g", "h", "j", "k", "l", "m", "ù", "¨"},
-               {"⇧", "w", "x", "c", "v", "b", "n", "é", "è", "à", "ç", "œ"},
-               {",", ".", ";", ":", "-", "_", "+", "=", "*", "/", "(", ")"},
-               {"[lang]", "'", "\"", "@", "€", "␣", "␣", "␣", "[emoji]", "[emoji]", "⏎", "⏎"}},
-    [KB_DE] = {{"1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "ß", "?"},   // QWERTZ
-               {"q", "w", "e", "r", "t", "z", "u", "i", "o", "p", "ü", "⌫"},
-               {"a", "s", "d", "f", "g", "h", "j", "k", "l", "ö", "ä", "!"},
-               {"⇧", "y", "x", "c", "v", "b", "n", "m", ",", ".", "-", ":"},
-               {";", "_", "+", "=", "*", "/", "%", "&", "(", ")", "\"", "'"},
-               {"[lang]", "@", "#", "€", "~", "␣", "␣", "␣", "[emoji]", "[emoji]", "⏎", "⏎"}},
-    // Arabic (the PC layout's letter rows), with the hamza forms of alef and the Persian letters on the fifth row
-    [KB_AR] = {{"1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "؟", "!"},
-               {"ض", "ص", "ث", "ق", "ف", "غ", "ع", "ه", "خ", "ح", "ج", "⌫"},
-               {"ش", "س", "ي", "ب", "ل", "ا", "ت", "ن", "م", "ك", "ط", "د"},
-               {"ئ", "ء", "ؤ", "ر", "لا", "ى", "ة", "و", "ز", "ظ", "ذ", "،"},
-               {"أ", "إ", "آ", "پ", "چ", "ژ", "گ", "ک", "ی", ".", ":", "-"},
-               {"[lang]", "(", ")", "@", "%", "␣", "␣", "␣", "[emoji]", "[emoji]", "⏎", "⏎"}},
-    // kana in the order of the syllabary: one column per consonant, one row per vowel
-    [KB_JA] = {{"あ", "か", "さ", "た", "な", "は", "ま", "や", "ら", "わ", "゛", "⌫"},
-               {"い", "き", "し", "ち", "に", "ひ", "み", "「", "り", "を", "゜", "小"},
-               {"う", "く", "す", "つ", "ぬ", "ふ", "む", "ゆ", "る", "ん", "ー", "、"},
-               {"え", "け", "せ", "て", "ね", "へ", "め", "」", "れ", "？", "！", "。"},
-               {"お", "こ", "そ", "と", "の", "ほ", "も", "よ", "ろ", "⇧", "・", "〜"},
-               {"[lang]", "（", "）", "：", "…", "␣", "␣", "␣", "[emoji]", "[emoji]", "⏎", "⏎"}},
-    // two-set hangul (Shift: the double consonants and ㅒ ㅖ)
-    [KB_KO] = {{"1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "?", "!"},
-               {"ㅂ", "ㅈ", "ㄷ", "ㄱ", "ㅅ", "ㅛ", "ㅕ", "ㅑ", "ㅐ", "ㅔ", ".", "⌫"},
-               {"ㅁ", "ㄴ", "ㅇ", "ㄹ", "ㅎ", "ㅗ", "ㅓ", "ㅏ", "ㅣ", ",", ";", ":"},
-               {"⇧", "ㅋ", "ㅌ", "ㅊ", "ㅍ", "ㅠ", "ㅜ", "ㅡ", "-", "'", "\"", "~"},
-               {"_", "+", "=", "*", "/", "%", "&", "<", ">", "(", ")", "@"},
-               {"[lang]", "#", "$", "^", "…", "␣", "␣", "␣", "[emoji]", "[emoji]", "⏎", "⏎"}},
 };
-static const char* kb_names[N_KB_LAYOUTS] = {"ES", "EN", "PT", "RU", "FR", "DE", "AR", "JA", "KO"};
-static const char* kb_abc[N_KB_LAYOUTS] = {"ABC", "ABC", "ABC", "АБВ", "ABC", "ABC", "أبج", "あいう", "가나다"};
-static const char* kb_dead[N_KB_LAYOUTS][4] = {[KB_ES] = {"´"}, [KB_PT] = {"´", "~", "^", "`"}, [KB_FR] = {"^", "¨"}};
+static const char* kb_names[N_KB_LAYOUTS] = {"ES", "EN", "PT", "RU"};
+static const char* kb_dead[N_KB_LAYOUTS][4] = {[KB_ES] = {"´"}, [KB_PT] = {"´", "~", "^", "`"}};
 
 static int is_dead(int layout, const char* key) {
     for (int i = 0; i < 4 && kb_dead[layout][i]; i++)
@@ -2360,20 +1859,20 @@ static int is_dead(int layout, const char* key) {
     return 0;
 }
 
-static int kana_key(int layout, const char* key) {   // ゛ ゜ 小: 1, 2, 3
-    if (layout != KB_JA) return 0;
-    return !strcmp(key, "゛") ? 1 : !strcmp(key, "゜") ? 2 : !strcmp(key, "小") ? 3 : 0;
-}
-
-int kb_layout_for(int lang) {
-    static const int map[N_LANGS] = {KB_ES, KB_EN, KB_PT, KB_RU, KB_FR, KB_DE, KB_AR, KB_JA, KB_EN, KB_EN, KB_KO};
-    return lang >= 0 && lang < N_LANGS ? map[lang] : KB_EN;
-}
-
 #include "emoji_pages.h"
 static const char* kb_emoji_bar[KB_COLS] = {"[abc]", "[abc]", "[t0]", "[t1]", "[t2]", "[t3]", "[t4]",
                                             "[t5]", "[t6]", "⌫", "⏎", "⏎"};
 _Static_assert(EMOJI_ROWS == KB_ROWS - 1 && EMOJI_COLS == KB_COLS && EMOJI_PAGES == 7, "emoji layout");
+static const char* emoji_titles[N_LANGS][EMOJI_PAGES] = {
+    {"Caras", "Gestos y personas", "Animales y naturaleza", "Comida y bebida", "Actividades y viajes", "Objetos",
+     "Corazones y símbolos"},
+    {"Smileys", "Gestures & people", "Animals & nature", "Food & drink", "Activities & travel", "Objects",
+     "Hearts & symbols"},
+    {"Carinhas", "Gestos e pessoas", "Animais e natureza", "Comida e bebida", "Atividades e viagens", "Objetos",
+     "Corações e símbolos"},
+    {"Смайлики", "Жесты и люди", "Животные и природа", "Еда и напитки", "Занятия и путешествия", "Предметы",
+     "Сердца и символы"},
+};
 
 static const char* kb_key(const Kb* kb, int row, int col) {
     if (kb->page == 0) return kb_layouts[kb->layout][row][col];
@@ -2389,19 +1888,7 @@ static int kb_span(const Kb* kb, int row, int col) {
 
 void kb_init(Kb* kb, int layout) {
     memset(kb, 0, sizeof(*kb));
-    kb->layout = kb->home = layout, kb->row = 1, kb->last_emoji_page = 1;
-}
-
-// The language key: the layout it opened with, English, then the others.
-static int kb_next_layout(const Kb* kb) {
-    int order[N_KB_LAYOUTS], n = 0;
-    order[n++] = kb->home;
-    if (kb->home != KB_EN) order[n++] = KB_EN;
-    for (int l = 0; l < N_KB_LAYOUTS; l++)
-        if (l != kb->home && l != KB_EN) order[n++] = l;
-    for (int i = 0; i < n; i++)
-        if (order[i] == kb->layout) return order[(i + 1) % n];
-    return kb->home;
+    kb->layout = layout, kb->row = 1, kb->last_emoji_page = 1;
 }
 
 void kb_move(Kb* kb, int dx, int dy) {
@@ -2435,15 +1922,8 @@ void kb_backspace(char* out) {
 static uint32_t upper_cp(uint32_t c) {
     if (c >= 'a' && c <= 'z') return c - 32;
     if (c >= 0xE0 && c <= 0xFE && c != 0xF7) return c - 32;
-    if (c == 0xFF) return 0x178;
-    if (c == 0x153) return 0x152;
     if (c >= 0x430 && c <= 0x44F) return c - 32;
     if (c >= 0x450 && c <= 0x45F) return c - 80;
-    if (c >= 0x3041 && c <= 0x3096) return c + 0x60;   // hiragana -> katakana
-    static const uint16_t ko[][2] = {{0x3142, 0x3143}, {0x3148, 0x3149}, {0x3137, 0x3138}, {0x3131, 0x3132},
-                                     {0x3145, 0x3146}, {0x3150, 0x3152}, {0x3154, 0x3156}};   // ㅂ->ㅃ ... ㅔ->ㅖ
-    for (size_t i = 0; i < sizeof(ko) / sizeof(ko[0]); i++)
-        if (ko[i][0] == c) return ko[i][1];
     return c;
 }
 
@@ -2451,9 +1931,7 @@ static uint32_t upper_cp(uint32_t c) {
 static void kb_compose(const char* key, int shift, const char* dead, char* out, int max) {
     static const char* table[][3] = {{"´", "a", "á"}, {"´", "e", "é"}, {"´", "i", "í"}, {"´", "o", "ó"}, {"´", "u", "ú"},
                                      {"~", "a", "ã"}, {"~", "o", "õ"}, {"~", "n", "ñ"}, {"^", "a", "â"}, {"^", "e", "ê"},
-                                     {"^", "o", "ô"}, {"^", "i", "î"}, {"^", "u", "û"}, {"`", "a", "à"}, {"`", "e", "è"},
-                                     {"`", "u", "ù"}, {"¨", "a", "ä"}, {"¨", "e", "ë"}, {"¨", "i", "ï"}, {"¨", "o", "ö"},
-                                     {"¨", "u", "ü"}, {"¨", "y", "ÿ"}};
+                                     {"^", "o", "ô"}, {"`", "a", "à"}};
     const char* base = key;
     if (dead)
         for (size_t i = 0; i < sizeof(table) / sizeof(table[0]); i++)
@@ -2466,136 +1944,25 @@ static void kb_compose(const char* key, int shift, const char* dead, char* out, 
     out[n] = 0;
 }
 
-// The last character of out: its codepoint and where it starts (0 if out is empty).
-static uint32_t last_cp(const char* out, size_t* at) {
-    size_t i = strlen(out);
-    if (!i) return *at = 0, 0;
-    while (i > 0 && ((uint8_t)out[--i] & 0xC0) == 0x80) {}
-    const char* p = out + i;
-    *at = i;
-    return utf8_next(&p);
-}
-
-// Puts cps[0..n) in place of out's text from byte at, if it fits.
-static void replace_tail(char* out, int max, size_t at, const uint32_t* cps, int n) {
-    char s[16];
-    int k = 0;
-    for (int i = 0; i < n; i++) k += utf8_put(cps[i], s + k);
-    if (at + k < (size_t)max) memcpy(out + at, s, k), out[at + k] = 0;
-}
-
-// ゛ ゜ 小 (kind 1, 2, 3) on the kana before them: か -> が, は -> ぱ, つ -> っ, and back. 0 = does not apply.
-static uint32_t kana_change(uint32_t c, int kind) {
-    int kata = c >= 0x30A1 && c <= 0x30F6;
-    uint32_t h = kata ? c - 0x60 : c, r = 0;
-    if (kind == 1) {
-        if (h >= 0x304B && h <= 0x3062) r = (h - 0x304B) % 2 ? h - 1 : h + 1;   // か..ぢ
-        else if (h >= 0x3064 && h <= 0x3069) r = (h - 0x3064) % 2 ? h - 1 : h + 1;   // つ..ど
-        else if (h >= 0x306F && h <= 0x307D) r = (h - 0x306F) % 3 == 1 ? h - 1 : h - (h - 0x306F) % 3 + 1;   // は..ぽ
-        else if (h == 0x3046) r = 0x3094;
-        else if (h == 0x3094) r = 0x3046;
-    } else if (kind == 2) {
-        if (h >= 0x306F && h <= 0x307D) r = (h - 0x306F) % 3 == 2 ? h - 2 : h - (h - 0x306F) % 3 + 2;
-    } else {
-        static const uint16_t big[] = {0x3042, 0x3044, 0x3046, 0x3048, 0x304A, 0x3064, 0x3084, 0x3086, 0x3088, 0x308F};
-        for (size_t i = 0; i < sizeof(big) / sizeof(big[0]) && !r; i++)
-            r = h == big[i] ? h - 1u : h == big[i] - 1u ? h + 1u : 0;
-    }
-    return r ? (kata ? r + 0x60 : r) : 0;
-}
-
-// Two-set hangul: a jamo joins the syllable before it. Consonants are compatibility jamo U+3131-314E, vowels
-// U+314F-3163 (in the order of the syllables' vowels); a syllable is 0xAC00 + (initial * 21 + vowel) * 28 + final.
-static const int8_t ko_initial[30] = {0, 1, -1, 2, -1, -1, 3, 4, 5, -1, -1, -1, -1, -1, -1,
-                                      -1, 6, 7, 8, -1, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18};
-static const int8_t ko_final[30] = {1, 2, 3, 4, 5, 6, 7, 0, 8, 9, 10, 11, 12, 13, 14,
-                                    15, 16, 17, 0, 18, 19, 20, 21, 22, 0, 23, 24, 25, 26, 27};
-static const uint16_t ko_final_jamo[28] = {0, 0x3131, 0x3132, 0x3133, 0x3134, 0x3135, 0x3136, 0x3137, 0x3139, 0x313A,
-                                           0x313B, 0x313C, 0x313D, 0x313E, 0x313F, 0x3140, 0x3141, 0x3142, 0x3144,
-                                           0x3145, 0x3146, 0x3147, 0x3148, 0x314A, 0x314B, 0x314C, 0x314D, 0x314E};
-static const uint16_t ko_double_final[][3] = {{1, 0x3145, 3},   {4, 0x3148, 5},   {4, 0x314E, 6},  {8, 0x3131, 9},
-                                              {8, 0x3141, 10},  {8, 0x3142, 11},  {8, 0x3145, 12}, {8, 0x314C, 13},
-                                              {8, 0x314D, 14},  {8, 0x314E, 15},  {17, 0x3145, 18}};   // ㄳ ㄵ ㄶ ㄺ ...
-static const uint8_t ko_double_vowel[][3] = {{8, 0, 9}, {8, 1, 10}, {8, 20, 11}, {13, 4, 14}, {13, 5, 15}, {13, 20, 16},
-                                             {18, 20, 19}};   // ㅘ ㅙ ㅚ ㅝ ㅞ ㅟ ㅢ
-
-static uint32_t ko_syllable(int initial, int vowel, int final) { return 0xAC00 + (initial * 21 + vowel) * 28 + final; }
-
-static void hangul_type(char* out, int max, uint32_t j) {
-    size_t at;
-    uint32_t last = last_cp(out, &at);
-    int syl = last >= 0xAC00 && last <= 0xD7A3, s = syl ? (int)(last - 0xAC00) : 0;
-    int ini = s / 588, vow = s / 28 % 21, fin = s % 28;
-    char one[8];
-    if (j <= 0x314E) {   // a consonant: the final of the syllable before, or a double final
-        uint32_t c[1];
-        if (syl && !fin && ko_final[j - 0x3131]) {
-            c[0] = ko_syllable(ini, vow, ko_final[j - 0x3131]);
-            replace_tail(out, max, at, c, 1);
-            return;
-        }
-        for (size_t k = 0; syl && fin && k < sizeof(ko_double_final) / sizeof(ko_double_final[0]); k++)
-            if (ko_double_final[k][0] == fin && ko_double_final[k][1] == j) {
-                c[0] = ko_syllable(ini, vow, ko_double_final[k][2]);
-                replace_tail(out, max, at, c, 1);
-                return;
-            }
-    } else {   // a vowel
-        int v = (int)(j - 0x314F);
-        if (last >= 0x3131 && last <= 0x314E && ko_initial[last - 0x3131] >= 0) {   // after a lone consonant
-            uint32_t c[1] = {ko_syllable(ko_initial[last - 0x3131], v, 0)};
-            replace_tail(out, max, at, c, 1);
-            return;
-        }
-        if (syl && fin) {   // the final consonant starts the new syllable (or the second half of a double one)
-            int keep = 0;
-            uint32_t moved = ko_final_jamo[fin];
-            for (size_t k = 0; k < sizeof(ko_double_final) / sizeof(ko_double_final[0]); k++)
-                if (ko_double_final[k][2] == fin) keep = ko_double_final[k][0], moved = ko_double_final[k][1];
-            uint32_t c[2] = {ko_syllable(ini, vow, keep), ko_syllable(ko_initial[moved - 0x3131], v, 0)};
-            replace_tail(out, max, at, c, 2);
-            return;
-        }
-        for (size_t k = 0; syl && k < sizeof(ko_double_vowel) / sizeof(ko_double_vowel[0]); k++)
-            if (ko_double_vowel[k][0] == vow && ko_double_vowel[k][1] == v) {
-                uint32_t c[1] = {ko_syllable(ini, ko_double_vowel[k][2], 0)};
-                replace_tail(out, max, at, c, 1);
-                return;
-            }
-    }
-    one[utf8_put(j, one)] = 0;
-    kb_append(out, max, one);
-}
-
 int kb_press(Kb* kb, char* out, int max) {
     const char* key = kb_key(kb, kb->row, kb->col);
-    int kana = kb->page == 0 ? kana_key(kb->layout, key) : 0;
     if (!strcmp(key, "⏎")) return 1;
     if (!strcmp(key, "⌫")) kb_backspace(out);
     else if (!strcmp(key, "⇧")) kb->shift = !kb->shift;
     else if (!strcmp(key, "␣")) kb_append(out, max, " "), kb->dead = NULL;
     else if (!strcmp(key, "[emoji]")) kb->page = kb->last_emoji_page;
     else if (!strcmp(key, "[abc]")) kb->page = 0;
-    else if (!strcmp(key, "[lang]")) kb->layout = kb_next_layout(kb), kb->shift = 0, kb->dead = NULL;
+    else if (!strcmp(key, "[lang]")) kb->layout = (kb->layout + 1) % N_KB_LAYOUTS, kb->shift = 0, kb->dead = NULL;
     else if (!strncmp(key, "[t", 2)) kb->page = kb->last_emoji_page = 1 + (key[2] - '0');
-    else if (kana) {   // ゛ ゜ 小 change the kana before them (on anything else ゛ and ゜ are typed as they are)
-        size_t at;
-        uint32_t c = kana_change(last_cp(out, &at), kana);
-        if (c) replace_tail(out, max, at, &c, 1);
-        else if (kana < 3) kb_append(out, max, key);
-    } else if (kb->page == 0 && is_dead(kb->layout, key)) {
+    else if (kb->page == 0 && is_dead(kb->layout, key)) {
         if (kb->dead && !strcmp(kb->dead, key)) kb_append(out, max, key), kb->dead = NULL;   // twice: the accent itself
         else kb->dead = key;
     } else {
         char s[32];
         kb_compose(key, kb->shift, kb->dead, s, sizeof(s));
-        const char* q = s;
-        uint32_t c = utf8_next(&q);
         if (kb->dead && !strcmp(s, key)) kb_append(out, max, kb->dead);   // accent that does not combine: keep it
-        if (kb->layout == KB_KO && kb->page == 0 && !*q && c >= 0x3131 && c <= 0x3163) hangul_type(out, max, c);
-        else kb_append(out, max, s);
-        kb->dead = NULL;
-        if (kb->layout != KB_JA) kb->shift = 0;   // shift applies to one letter, like a phone keyboard (katakana stay)
+        kb_append(out, max, s);
+        kb->dead = NULL, kb->shift = 0;   // shift applies to one letter, like a phone keyboard
     }
     if (kb->page) kb->last_emoji_page = kb->page;
     return 0;
@@ -2616,11 +1983,9 @@ static void draw_field(int x, int y, int w, const char* text, double time) {
     int pad = 28, inner_w = w - 2 * pad;
     int caret_x, caret_y, caret_h;
     int blink = fmod(time, 1.0) < 0.6;
-    if (!text[0]) {   // (in a right-to-left language the empty field starts at its right edge)
-        int r = lang_rtl(ui_lang);
-        const char* ph = tr(S_PLACEHOLDER);
-        draw_str(&font, r ? x + w - pad - str_width(&font, ph) : x + pad, y + (FIELD_H - font.line) / 2, ph, C_TEXT_MUTED);
-        if (blink) rrect(r ? x + w - pad + 1 : x + pad - 4, y + (FIELD_H - 36) / 2, 3, 36, 1, C_ACCENT_HI, 255);
+    if (!text[0]) {
+        draw_str(&font, x + pad, y + (FIELD_H - font.line) / 2, tr(S_PLACEHOLDER), C_TEXT_MUTED);
+        if (blink) rrect(x + pad - 4, y + (FIELD_H - 36) / 2, 3, 36, 1, C_ACCENT_HI, 255);
         return;
     }
     static Layout* L;
@@ -2629,11 +1994,10 @@ static void draw_field(int x, int y, int w, const char* text, double time) {
     int oy = y + 10 + (l->height <= area ? (area - l->height) / 2 : area - l->height);   // keep the end in view
     set_clip(x + 4, y + 4, x + w - 4, y + FIELD_H - 4);
     draw_layout(l, x + pad, oy);
-    int rtl;
-    layout_end(l, &caret_x, &caret_y, &caret_h, &rtl);
+    layout_end(l, &caret_x, &caret_y, &caret_h);
     size_t n = strlen(text);
-    for (size_t i = n; i > 0 && text[i - 1] == ' '; i--) caret_x += rtl ? -font.space : font.space;   // trailing spaces
-    if (blink) rrect(x + pad + caret_x + (rtl ? -5 : 2), oy + caret_y + (caret_h - 36) / 2, 3, 36, 1, C_ACCENT_HI, 255);
+    for (size_t i = n; i > 0 && text[i - 1] == ' '; i--) caret_x += font.space;   // trailing spaces
+    if (blink) rrect(x + pad + caret_x + 2, oy + caret_y + (caret_h - 36) / 2, 3, 36, 1, C_ACCENT_HI, 255);
     no_clip();
 }
 
@@ -2642,12 +2006,11 @@ static void key_label(const Kb* kb, const char* key, char* out, int max, const F
     if (!strcmp(key, "␣")) snprintf(out, max, "%s", tr(S_SPACE_KEY)), *f = &font_small;
     else if (!strcmp(key, "⏎")) snprintf(out, max, "%s", tr(S_SEND_KEY)), *f = &font_bold;
     else if (!strcmp(key, "[emoji]")) snprintf(out, max, "😀");
-    else if (!strcmp(key, "[abc]")) snprintf(out, max, "%s", kb_abc[kb->layout]), *f = &font_bold;
+    else if (!strcmp(key, "[abc]")) snprintf(out, max, "%s", kb_layouts[kb->layout][1][0][0] & 0x80 ? "АБВ" : "ABC"), *f = &font_bold;
     else if (!strcmp(key, "[lang]")) snprintf(out, max, "🌐 %s", kb_names[kb->layout]), *f = &font_small;
     else if (!strncmp(key, "[t", 2)) snprintf(out, max, "%s", emoji_tab[key[2] - '0']), *f = &font_big;
     else if (kb->page > 0) snprintf(out, max, "%s", key), *f = &font_big;   // emoji at ~25 px
     else if (is_dead(kb->layout, key)) snprintf(out, max, "%s", key), *f = &font_big;   // accents are tiny: bigger
-    else if (kana_key(kb->layout, key)) snprintf(out, max, "%s", (const char*[]){"", "濁点", "半濁点", "小"}[kana_key(kb->layout, key)]);
     else if (!strcmp(key, "⇧") || !strcmp(key, "⌫")) snprintf(out, max, "%s", key);
     else kb_compose(key, kb->shift, kb->dead, out, max);
 }
@@ -2658,7 +2021,7 @@ static void kb_draw_key(const Kb* kb, int r, int k, int x0, int y0, int sel) {
     int span = kb_span(kb, r, k);
     int x = x0 + k * (KEY_W + KEY_GAP), ky = y0 + r * (KEY_H + KEY_GAP), w = span * (KEY_W + KEY_GAP) - KEY_GAP;
     int special = key[0] == '[' || !strcmp(key, "⇧") || !strcmp(key, "⌫") || !strcmp(key, "␣") ||
-                  (kb->page == 0 && (is_dead(kb->layout, key) || kana_key(kb->layout, key)));
+                  (kb->page == 0 && is_dead(kb->layout, key));
     int enter = !strcmp(key, "⏎");
     int on = (!strcmp(key, "⇧") && kb->shift) || (kb->dead && !strcmp(key, kb->dead)) ||
              (kb->page > 0 && !strncmp(key, "[t", 2) && key[2] - '0' == kb->page - 1);
@@ -2686,7 +2049,7 @@ static void kb_draw_key(const Kb* kb, int r, int k, int x0, int y0, int sel) {
 void draw_keyboard(const Kb* kb, const char* text, double time) {
     int px = (SCREEN_W - KEYS_W) / 2 - PANEL_PAD;
     int x0 = px + PANEL_PAD, y = PANEL_Y + PANEL_PAD, y0 = y + FIELD_H + 24;
-    int sig = kb->layout | kb->page << 4 | kb->shift << 7 | ui_lang << 8 |
+    int sig = kb->layout | kb->page << 3 | kb->shift << 7 | ui_lang << 8 |
               (kb->dead ? 1 + (int)((uintptr_t)kb->dead % 4093) : 0) << 12;
     if (!kb_cache) kb_cache = ui_screen_buf();
     if (sig != kb_cache_sig || !kb_cache) {
@@ -2697,15 +2060,13 @@ void draw_keyboard(const Kb* kb, const char* text, double time) {
         for (int r = 0; r < KB_ROWS; r++)
             for (int k = 0; k < KB_COLS; k++)
                 if (k == 0 || strcmp(kb_key(kb, r, k), kb_key(kb, r, k - 1))) kb_draw_key(kb, r, k, x0, y0, 0);
-        // (in Chinese, Japanese and Korean, OPTIONS: the system keyboard, with its input methods)
         const Hint h_letters[] = {{BTN_CROSS, S_KB_TYPE}, {BTN_SQUARE, S_KB_DELETE}, {BTN_TRIANGLE, S_KB_SPACE},
                                   {BTN_L1, S_KB_SHIFT},   {BTN_R1, S_KB_EMOJI},      {BTN_L2, S_KB_DICTATE},
-                                  {BTN_R2, S_KB_SEND},    {BTN_CIRCLE, S_KB_CLOSE},  {BTN_OPTIONS, S_KB_SYSTEM}};
-        int cjk = ui_lang == LANG_JA || ui_lang == LANG_ZH_HANS || ui_lang == LANG_ZH_HANT || ui_lang == LANG_KO;
+                                  {BTN_R2, S_KB_SEND},    {BTN_CIRCLE, S_KB_CLOSE}};
         const Hint h_emoji[] = {{BTN_CROSS, S_KB_TYPE}, {BTN_SQUARE, S_KB_DELETE}, {BTN_TRIANGLE, S_KB_SPACE},
                                 {BTN_R1, S_KB_LETTERS}, {BTN_R2, S_KB_SEND},      {BTN_CIRCLE, S_KB_CLOSE}};
         if (kb->page) draw_footer(h_emoji, 6, emoji_titles[ui_lang][kb->page - 1]);
-        else draw_footer(h_letters, cjk ? 9 : 8, NULL);
+        else draw_footer(h_letters, 8, NULL);
         if (kb_cache) {
             memcpy(kb_cache, back, SCREEN_W * SCREEN_H * 4);
             kb_cache_sig = sig;

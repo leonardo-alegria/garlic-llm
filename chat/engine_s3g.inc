@@ -112,8 +112,8 @@ int s3g_init(Engine* e, const char* dir) {
     snprintf(path, sizeof(path), "%s/s3g_voice.bin", dir);
     if (s3_read_voice(path, &g->voice[0])) return -1;
     g->nvoice = 1;
-    static const char* langs[] = {"es", "pt", "ru", "it", "fr", "de", "en", "ar", "ja"};
-    for (int i = 0; i < 9 && g->nvoice < 8; i++) {
+    static const char* langs[] = {"es", "pt", "ru", "it", "fr", "de", "en"};
+    for (int i = 0; i < 7 && g->nvoice < 8; i++) {
         snprintf(path, sizeof(path), "%s/s3g_voice_%s.bin", dir, langs[i]);
         S3Voice* v = &g->voice[g->nvoice];
         if (s3_read_voice(path, v)) continue;
