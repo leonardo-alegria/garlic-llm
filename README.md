@@ -108,12 +108,13 @@ curl http://192.168.1.5:8080/v1/chat/completions \
   -d '{"messages":[{"role":"user","content":"Hello"}],"max_tokens":128}'
 ```
 
-- `GET /v1/models`, `POST /v1/chat/completions` (`stream: true` for server-sent events), `GET /health`.
+- `GET /v1/models`, `POST /v1/chat/completions` (`stream: true` for server-sent events), `POST /v1/audio/speech`, `GET /v1/audio/voices`, `GET /health`.
 - The OpenAPI 3.1 description is at `GET /openapi.json` (also in [`chat/assets/openapi.json`](chat/assets/openapi.json)).
 - Replies are generated the way the chat generates its own, speculative decoding included.
 - One request runs at a time, and the chat screen is busy while it does: it says that a request is being answered, and ○ stops the reply (the client gets what was written so far, with `finish_reason: "length"`). Requests wait while the keyboard, voice mode or a Python program is open.
 - A request is a conversation of its own, so the one on the console's screen is cleared.
-- Reasoning is off. Only `n = 1` is supported; `tools`, `logprobs` and similar parameters are ignored.
+- Reasoning is off. Tool calling (`tools`, `tool_choice`, `tool_calls` and `role: "tool"` messages) and spoken audio replies (`"modalities": ["text", "audio"]` or `"audio": {"format": "wav", "voice": "auto"}`, returning base64 24 kHz WAV in `message.audio.data`) are supported; [`pc/web_search.py`](pc/web_search.py) is a keyless web search client (DuckDuckGo + Wikipedia) for the API. Only `n = 1` is supported.
+- Standalone TTS is available at `POST /v1/audio/speech` (returns 24 kHz `audio/wav` by default or raw PCM when `response_format` is `"pcm"`/`"pcm16"`). `GET /v1/audio/voices` lists built-in voices and any custom `PS3V` `.bin` voices placed in `/data/garlic/voices/` on the console (created with [`pc/make_voice.py`](pc/make_voice.py)).
 - For an API key, put it in `/data/garlic_api_key.txt` on the console. Requests then need `Authorization: Bearer <key>`. Without that file, anyone on your network can use the API while it is on, and clients that insist on a key accept any text.
 - If the screen shows `API · :8080`, the app could not read the console's address: it is in *Settings → Network → View Connection Status*.
 
@@ -142,7 +143,7 @@ The app's data files (fonts, tokenizer tables, compiled kernels) are already in 
 
 **Model files**
 
-A plain build keeps the weights outside the package. The app looks for each of these files first inside its package (`/app0/models`) and then in `/data` on the console:
+A plain build keeps the weights outside the package (~39 MiB PKG, built in ~2 seconds). The app looks for each of these files first in `/data/garlic/models` on the console, then in `/data/garlic-llm/models`, `/data`, and inside its package (`/app0/models`):
 
 | File | Size | Contents |
 |---|---|---|
@@ -154,7 +155,7 @@ A plain build keeps the weights outside the package. The app looks for each of t
 
 The code can also build a smaller app with Qwen3.5-4B (`--4b`, weights in `qwen3.5-4b-q4i.bin`). It has no speculative decoding and is not released as a package.
 
-Download them from [Hugging Face](https://huggingface.co/garlic-llm/garlic-llm-ps4). `python pc/upload_model.py <file>` copies a file to `/data` on the console. To build the all-in-one package instead, put the files in `models/` and add `--full` to the build command.
+Download them from [Hugging Face](https://huggingface.co/garlic-llm/garlic-llm-ps4). `python pc/upload_model.py` copies all `models/*.bin` files once to `/data/garlic/models` on the console (skipping any already present), so subsequent code updates only need `python build_chat.py --upload` (~39 MiB). To build the all-in-one package instead, put the files in `models/` and add `--full` to the build command.
 
 The scripts that made them from the original checkpoints are in `pc/`, and each one's header describes its inputs and the file format it writes. The first conversion of the Qwen models (`pc/modal_qwen35*.py`) runs on [Modal](https://modal.com), on machines with 32 to 64 GB of memory.
 
