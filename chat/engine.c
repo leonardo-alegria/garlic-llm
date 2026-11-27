@@ -63,6 +63,13 @@ static void spec_prefill(Engine* e, uint64_t stage, uint32_t n, uint32_t pos0);
 uint64_t spec_carry(void);
 #endif
 static int gpu_selftest(Engine* e);   // (after begin)
+// Maple-Preview (engine_maple.inc, at the end)
+static int maple_init(Engine* e, const char* dir, ProgressFn progress, void* user);
+static int maple_run(Engine* e, const uint32_t* tokens, int n, int pos0, float temperature, uint32_t seed, uint32_t* next);
+static uint64_t maple_state_size(const Engine* e);
+static int maple_state_copy(Engine* e, uint64_t buf, int save);
+static void maple_unload(void);
+static void asset_path(char* out, size_t n, const char* dir, const char* name);
 
 static void fail(Engine* e, const char* fmt, ...) {
     va_list ap;
@@ -74,18 +81,95 @@ static void fail(Engine* e, const char* fmt, ...) {
     sceKernelDebugOutText(0, line);
 }
 
-// Where a weights file is: inside the package (/app0/models, the all-in-one PKG) or, with an app-only package, at the
-// path its index names (in /data). The first one that exists; path (129 bytes or more) is rewritten in place.
+const char* eng_model_dir;   // (engine.h) the models folder's choice
+const char* eng_mtp_dir;
+
+static int file_exists(const char* p) {
+    int f = open(p, O_RDONLY);
+    if (f < 0) return 0;
+    close(f);
+    return 1;
+}
+
+// dir/name, unless the chosen model folder (eng_model_dir) has that file.
+static void asset_path(char* out, size_t n, const char* dir, const char* name) {
+    if (eng_model_dir) {
+        snprintf(out, n, "%s/%s", eng_model_dir, name);
+        if (file_exists(out)) return;
+    }
+    snprintf(out, n, "%s/%s", dir, name);
+}
+
+// Where a weights file is: in eng_model_dir, /data/garlic/models, /data/garlic-llm/models, /data (the path its index
+// names), inside the package (/app0/models, the all-in-one PKG), or as a last fallback inside a subfolder of
+// /data/garlic/models. The first one that exists; path (129 bytes or more) is rewritten in place.
 static void weights_locate(char* path) {
     const char* base = strrchr(path, '/');
-    char in_pkg[129];
-    snprintf(in_pkg, sizeof(in_pkg), "/app0/models/%s", base ? base + 1 : path);
-    int f = open(in_pkg, O_RDONLY);
-    if (f >= 0) {
-        close(f);
-        strcpy(path, in_pkg);
+    const char* name = base ? base + 1 : path;
+    if (eng_model_dir) {
+        char p[129];
+        snprintf(p, sizeof(p), "%s/%s", eng_model_dir, name);
+        if (file_exists(p)) {
+            strcpy(path, p);
+            say("weights: %s (models folder)", path);
+            return;
+        }
+    }
+    static const char* dirs[] = {"/data/garlic/models", "/data/garlic-llm/models", "/data", "/app0/models"};
+    int found = 0;
+    for (size_t i = 0; i < sizeof(dirs) / sizeof(dirs[0]); i++) {
+        char cand[129];
+        snprintf(cand, sizeof(cand), "%s/%s", dirs[i], name);
+        int f = open(cand, O_RDONLY);
+        if (f >= 0) {
+            close(f);
+            strcpy(path, cand);
+            found = 1;
+            break;
+        }
+    }
+    if (!found) {
+        int dfd = open("/data/garlic/models", O_RDONLY);
+        if (dfd >= 0) {
+            char dbuf[2048];
+            while (!found) {
+                int nread = sceKernelGetdents(dfd, dbuf, sizeof(dbuf));
+                if (nread <= 0) break;
+                for (int off = 0; off < nread && !found;) {
+                    uint16_t d_reclen;
+                    uint8_t d_namlen;
+                    memcpy(&d_reclen, dbuf + off + 4, 2);
+                    d_namlen = (uint8_t)dbuf[off + 7];
+                    if (d_reclen == 0) break;
+                    const char* fn = dbuf + off + 8;
+                    if (d_namlen > 0 && fn[0] != '.') {
+                        char cand[129];
+                        int r = snprintf(cand, sizeof(cand), "/data/garlic/models/%.*s/%s", (int)d_namlen, fn, name);
+                        if (r > 0 && r < (int)sizeof(cand)) {
+                            int f = open(cand, O_RDONLY);
+                            if (f >= 0) {
+                                close(f);
+                                strcpy(path, cand);
+                                found = 1;
+                            }
+                        }
+                    }
+                    off += d_reclen;
+                }
+            }
+            close(dfd);
+        }
     }
     say("weights: %s", path);
+}
+
+// A weights file of the chosen model's folder instead: the same file name, in dir.
+static void weights_in(char* path, const char* dir) {
+    const char* base = strrchr(path, '/');
+    char p[129];
+    snprintf(p, sizeof(p), "%s/%s", dir, base ? base + 1 : path);
+    strcpy(path, p);
+    say("weights: %s (models folder)", path);
 }
 
 static uint8_t* read_file(const char* path, size_t* size) {
@@ -142,6 +226,7 @@ static int reserve_garlic(Engine* e) {
         if (sceKernelAllocateDirectMemory(0, sceKernelGetDirectMemorySize(), size, ALIGN_2MB, 3, &off)) return -1;
         if (sceKernelMapDirectMemory(&addr, size, 0x33, 0, off, ALIGN_2MB)) return -1;
         e->mem = addr;
+        e->mem_off = (uint64_t)off;
         e->mem_size = size;
         return 0;
     }
@@ -281,7 +366,8 @@ static int load_index(Engine* e, const char* dir) {
     memcpy(&e->rope_theta, d + 48, 4);
     memcpy(e->weights_path, d + 52, 128);
     e->weights_path[128] = 0;
-    weights_locate(e->weights_path);
+    if (eng_model_dir) weights_in(e->weights_path, eng_model_dir);
+    else weights_locate(e->weights_path);
     memcpy(&e->weights_size, d + 180, 8);
     memcpy(&e->n_tensors, d + 188, 4);
     uint32_t rec0 = 192, vocab_map = 0;
@@ -340,6 +426,16 @@ int engine_init(Engine* e, const char* dir, ProgressFn progress, void* user) {
     e->tsc_freq = sceKernelGetTscFrequency();
     e->neo = sceKernelIsNeoMode() == 1;
     e->pf_rows = e->neo ? 64 : PF_ROWS;
+    {   // a Maple model folder (model.idx "PMAP") has its own path
+        char path[256], magic[4] = {0};
+        asset_path(path, sizeof(path), dir, "model.idx");
+        int f = open(path, O_RDONLY);
+        if (f >= 0) {
+            if (read(f, magic, 4) != 4) magic[0] = 0;
+            close(f);
+        }
+        if (!memcmp(magic, "PMAP", 4)) return maple_init(e, dir, progress, user);
+    }
     if (load_index(e, dir)) return -1;
     if (reserve_garlic(e)) {
         fail(e, "could not reserve GPU memory");
@@ -612,6 +708,7 @@ uint64_t engine_kv_lend(Engine* e, uint64_t* size) {
 void engine_kv_return(Engine* e) { e->ctx_limit = e->max_seq; }
 
 void engine_reset(Engine* e) {
+    if (e->maple) return;   // (its caches are written by position)
     for (uint32_t i = 0; i < e->n_layers; i++)
         if (!(e->full_mask >> i & 1)) {
             memset((void*)(uintptr_t)e->kc[i], 0, e->conv_n * 12);
@@ -1142,7 +1239,10 @@ static int gpu_selftest(Engine* e) {
 // The Gated DeltaNet layers' state (conv and delta rule), copied on the GPU to buf (save 1) or back from it (save 0).
 // With the attention cache, which is written by position, that is all a conversation needs to go back to an earlier
 // position: main.c takes a turn's reasoning out of the history this way ("Pensar"). 50.25 MiB for the 9B.
+uint64_t engine_alloc(Engine* e, uint64_t size) { return gpu_alloc(e, size); }
+
 uint64_t engine_state_size(const Engine* e) {
+    if (e->maple) return maple_state_size(e);
     uint64_t n = 0;
     for (uint32_t i = 0; i < e->n_layers; i++)
         if (!(e->full_mask >> i & 1)) n += ((e->conv_n * 12 + 255) & ~255ull) + ((e->state_bytes + 255) & ~255ull);
@@ -1153,6 +1253,7 @@ uint64_t engine_state_size(const Engine* e) {
 }
 
 int engine_state_copy(Engine* e, uint64_t buf, int save) {
+    if (e->maple) return maple_state_copy(e, buf, save);
     if (!e->qwen35 || !e->k_copy) return -1;
     begin(e);
     uint64_t p = buf;
@@ -1174,6 +1275,7 @@ int engine_state_copy(Engine* e, uint64_t buf, int save) {
 }
 
 int engine_run(Engine* e, const uint32_t* tokens, int n, int pos0, float temperature, uint32_t seed, uint32_t* next) {
+    if (e->maple) return maple_run(e, tokens, n, pos0, temperature, seed, next);
     if (pos0 + n > (int)e->max_seq || pos0 + n > (int)e->ctx_limit) {
         fail(e, "context full (%d tokens)", pos0 + n);
         return -1;
@@ -1809,3 +1911,38 @@ int asr_reload(Engine* e) {
 #ifdef GARLIC_SPEC
 #include "engine_spec.inc"
 #endif
+
+#include "engine_maple.inc"   // Maple-Preview (model.idx "PMAP")
+
+void engine_unload(Engine* e) {
+    if (!e) return;
+    maple_unload();
+    if (e->fd > 0) close(e->fd);
+    if (e->t3.fd > 0) close(e->t3.fd);
+    free(e->layer_base);
+    free(e->t);
+    free(e->kc);
+    free(e->vc);
+    free(e->ids);
+    free(e->row_cache);
+    free(e->row_tag);
+    free(e->asr.t);
+    free(e->asr.piece);
+    free(e->asr.mel);
+    if (e->asr.flex_len && e->asr.model) sceKernelMunmap((void*)(uintptr_t)e->asr.model, e->asr.flex_len);
+    free(e->t3.t);
+    free(e->t3.emb_cache);
+    free(e->t3.emb_tag);
+    free(e->t3.pos_rows);
+    free(e->t3.pre);
+    free(e->s3.t);
+    for (int i = 0; i < e->s3.nvoice && i < 16; i++) {
+        free(e->s3.voice[i].ptok);
+        free(e->s3.voice[i].pmel);
+    }
+    if (e->mem && e->mem_size) {
+        sceKernelMunmap(e->mem, e->mem_size);
+        sceKernelReleaseDirectMemory((off_t)e->mem_off, e->mem_size);
+    }
+    memset(e, 0, sizeof(*e));
+}

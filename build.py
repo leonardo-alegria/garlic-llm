@@ -24,8 +24,17 @@ BIN = OO / ("bin/windows" if WIN else "bin/linux")
 BUILD = ROOT / "build"
 PKGDIR = BUILD / "pkg"
 
-# The console's address for the uploads over FTP (GoldHEN's FTP server): set PS4_IP, and PS4_FTP_PORT if it is not 2121.
-PS4_IP = os.environ.get("PS4_IP", "")
+# The console's address for the uploads over FTP (GoldHEN's FTP server): set PS4_IP (or pass --ip <addr>), and PS4_FTP_PORT if it is not 2121.
+def _arg_ip():
+    for i, a in enumerate(sys.argv[:-1]):
+        if a in ("--ip", "-ip"):
+            return sys.argv[i + 1]
+        if a.startswith("--ip="):
+            return a.split("=", 1)[1]
+    return ""
+
+
+PS4_IP = _arg_ip() or os.environ.get("PS4_IP", "")
 FTP_PORT = int(os.environ.get("PS4_FTP_PORT") or 2121)
 
 CFLAGS = ["-target", "x86_64-freebsd-none", "-march=btver2", "-O2", "-fPIC", "-funwind-tables",

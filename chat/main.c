@@ -29,6 +29,7 @@
 #include "api.h"
 #include "api_proto.h"
 #include "engine.h"
+#include "models.h"
 #include "tokenizer.h"
 #include "pyrun.h"
 #include "ui.h"
@@ -39,6 +40,10 @@
 #define THINK 248068u           // Qwen3.5 <think> and </think>: an empty block = answer without thinking
 #define THINK_END 248069u
 #define MODEL_NAME (eng.qwen35 ? (eng.hidden >= 4096 ? "Qwen3.5-9B" : "Qwen3.5-4B") : "Qwen3-4B")
+// The model in use: the built-in one, or a folder of the models folder (model_choose), whose name is then the model's
+// name on the screen and in the API
+static char model_folder[MODEL_NAME_MAX];
+#define MODEL_SHOWN (model_folder[0] ? model_folder : MODEL_NAME)
 #define MAX_REPLY 3000
 // One log per app (so that opening the other app does not lose this one's log), and the one before it
 #if defined(GARLIC_4B)
@@ -324,6 +329,7 @@ static char think_text[32768];
 static size_t think_len;
 static uint32_t hist_ids[MAX_REPLY + 16];   // the turn as the model keeps it: an empty <think></think>, the answer
 static int hist_n, hist_done;
+static int api_snap_n;                      // tokens in the API's saved prefix snapshot (eng.asr.ws_begin), 0 = none
 static void start_turn(const char* user_text);
 
 static void toast(StrId id) {
@@ -344,7 +350,7 @@ static int code_msg(void) {
 }
 
 static void view_update(void) {
-    view.model = MODEL_NAME;
+    view.model = MODEL_SHOWN;
     view.pos = pos;
     view.max_seq = (int)eng.max_seq;
     view.can_run = !generating && code_msg() >= 0;
@@ -540,6 +546,7 @@ static void think_toggle(void) {
 static int think_save(void) {
     uint64_t need = engine_state_size(&eng);
     if (!eng.asr.ws_end || eng.asr.ws_end - eng.asr.ws_begin < need) return 0;
+    api_snap_n = 0;
     double t0 = now();
     if (engine_state_copy(&eng, eng.asr.ws_begin, 1)) {
         say("thinking: state copy failed (%s): the reasoning stays in the history", eng.error);
@@ -684,6 +691,7 @@ static void system_ahead(int tokens) {
     }
     if (sys_pre == 0) {
         sys_n = system_ids(sys_ids, 1024);
+        api_snap_n = 0;
         engine_reset(&eng);
     }
     int k = sys_n - sys_pre < tokens ? sys_n - sys_pre : tokens;
@@ -704,6 +712,7 @@ static void start_turn(const char* user_text) {
     int n = 0, max = 8192, think = think_on && !in_voice_mode && eng.qwen35;
     think_t_ask = now();
     sys_pre = 0;   // (a system prompt half read ahead is read again below)
+    api_snap_n = 0;
     if (pos == 0) {
         engine_reset(&eng);   // a new conversation: clear the Gated DeltaNet states
         n = system_ids(ids, max);
@@ -1130,6 +1139,7 @@ static void asr_wait(void);
 
 static int voice_to_text(uint32_t button, DrawUnder under, char* text, int max) {
     text[0] = 0;
+    api_snap_n = 0;
     asr_wait();   // (after a Python program the dictation weights are read back first)
     if (!eng.asr.ready) {
         toast(S_ASR_OFF);
@@ -1676,6 +1686,7 @@ static void spec_lend(void) {
 
 static void voice_mode(void) {
     in_voice_mode = 1;
+    api_snap_n = 0;
 #ifdef GARLIC_SPEC
     if (spec_lent) {   // the MTP head had T3's weights memory: T3 reads its weights again (~3.5 s)
         double t0 = now();
@@ -1879,9 +1890,236 @@ static void api_chat_end(void) {
 #endif
 }
 
+#define GARLIC_API_AUDIO
 #include "api_run.inc"   // the OpenAI-compatible API's jobs on the model (api.c serves the requests)
 
+// ---- the models folder (models.h): other weights for the model, chosen before it loads -----------------------------
+// Only when MODELS_DIR holds a folder with them: a list starts on the one chosen last (the built-in model until then),
+// Up / Down move and Cross starts it. A folder whose files do not match the built-in model is not loaded: a screen
+// says so (Cross or Circle goes on) and the built-in model starts. Without such a folder nothing changes.
+
+#if defined(GARLIC_4B)
+#define BUILTIN_NAME "Qwen3.5-4B"
+#else
+#define BUILTIN_NAME "Qwen3.5-9B"
+#endif
+
+static char model_dir[128];   // MODELS_DIR/<model_folder>: eng_model_dir, and eng_mtp_dir if it has its own head
+
+static uint32_t newly_pressed(uint32_t* prev) {
+    uint32_t b = read_buttons(), pressed = b & ~*prev;
+    *prev = b;
+    return pressed;
+}
+
+static int has_flat_weights(const char* weights) {
+    static const char* dirs[] = {"/data/garlic/models", "/data/garlic-llm/models", "/data", "/app0/models"};
+    for (size_t i = 0; i < sizeof(dirs) / sizeof(dirs[0]); i++) {
+        char p[129];
+        snprintf(p, sizeof(p), "%s/%s", dirs[i], weights);
+        int f = open(p, O_RDONLY);
+        if (f >= 0) {
+            close(f);
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static uint8_t* tok_data;
+
+static int load_current_model(int is_boot, char* err_out, size_t err_cap) {
+    if (!is_boot) {
+        api_snap_n = 0;
+        api_sys_n = 0;
+        pos = 0;
+        need_close = 0;
+        hist_n = hist_done = 0;
+        thinking = think_turn = 0;
+        sys_pre = 0;
+        view.scroll = 0;
+        msgs_clear();
+#ifdef GARLIC_SPEC
+        spec_lent = 0;
+#endif
+        tts_ready = 0;
+        tok_free(&tok);
+        free(tok_data);
+        tok_data = NULL;
+        engine_unload(&eng);
+    }
+    loading((void*)tr(S_PREPARING), 0.0f, NULL);
+    size_t tsize;
+    uint8_t* tdata = NULL;
+    if (eng_model_dir) {
+        char tpath[256];
+        snprintf(tpath, sizeof(tpath), "%s/tokenizer.bin", eng_model_dir);
+        tdata = read_all(tpath, &tsize);
+    }
+    if (!tdata) tdata = read_all(ASSETS "/tokenizer.bin", &tsize);
+    if (!tdata || tok_load(&tok, tdata, tsize)) {
+        free(tdata);
+        if (is_boot) show_error("tokenizer.bin");
+        if (err_out) snprintf(err_out, err_cap, "cannot load tokenizer.bin");
+        return -1;
+    }
+    tok_data = tdata;
+    say("tokenizer: %u tokens", tok.n_vocab);
+    eng_margin_mb = 64 - ui_screen_pool_mb();   // (the screen block came out of the system's 64 MiB)
+    const char* eng_assets = ASSETS;
+    if (engine_init(&eng, eng_assets, loading, (void*)tr(S_LOADING_MODEL))) {
+        if (is_boot) show_error(eng.error);
+        if (err_out) snprintf(err_out, err_cap, "%s", eng.error[0] ? eng.error : "engine_init failed");
+        return -1;
+    }
+    say("language model ready; GPU memory used %u of %u MiB; context cache %s, %u tokens (%u while voice mode "
+        "borrows %u MiB)", (unsigned)(eng.next >> 20), (unsigned)(eng.mem_size >> 20),
+        eng.tq ? "TurboQuant 4-bit" : "fp16 k + int8 v", eng.max_seq, eng.lend_ctx, (unsigned)(eng.kv_split >> 20));
+    if (!eng.maple) {
+        if (t3_init(&eng, ASSETS) == 0) {   // text to speech, first half (Chatterbox T3)
+            say("T3 ready; GPU memory used %u of %u MiB", (unsigned)(eng.next >> 20), (unsigned)(eng.mem_size >> 20));
+        } else {
+            say("T3 not loaded: %s", eng.error);
+        }
+    }
+    loading((void*)tr(S_LOADING_VOICE), 0.99f, NULL);
+    if (asr_init(&eng, ASSETS) == 0)
+        say("speech to text ready: up to %u s of audio", eng.asr.max_frames * 8 / 100);
+    else
+        say("speech to text not available (missing or no GPU memory left)");
+    size_t flex0 = 0;   // system memory left (the 9B's dictation weights live there; Python borrows them)
+    ((int32_t(*)(size_t*))sceKernelAvailableFlexibleMemorySize)(&flex0);
+    say("GPU memory used: %u of %u MiB; system RAM free: %u MiB", (unsigned)(eng.next >> 20),
+        (unsigned)(eng.mem_size >> 20), (unsigned)(flex0 >> 20));
+#ifdef GARLIC_SPEC
+    if (!eng.maple) {
+        if (spec_init(&eng, eng_assets) == 0) spec_lend();   // (before the start-up tests: they use it)
+        else say("spec: no MTP head (mtp.idx, the q4s model or a kernel missing)");
+    }
+#endif
+    if (is_boot && !eng.maple) kv_split_test();
+    if (!eng.maple) tts_boot();
+    size_t flex1 = 0;
+    ((int32_t(*)(size_t*))sceKernelAvailableFlexibleMemorySize)(&flex1);
+    say("voice %s; system RAM free: %u MiB", tts_ready ? "ready" : "not available", (unsigned)(flex1 >> 20));
+    api_set_model(MODEL_SHOWN);
+    api_set_context((int)eng.max_seq);   // (GET /v1/models reports it, so clients size their prompts)
+    return 0;
+}
+
+static int switch_to_model(const char* name, char* err_out, size_t err_cap) {
+    if (!name || !*name) {
+        if (err_out) snprintf(err_out, err_cap, "empty model name");
+        return -2;
+    }
+    if (!strcmp(name, MODEL_SHOWN)) return 0;   // already loaded
+    if (!strcmp(name, BUILTIN_NAME) || !strcmp(name, "builtin")) {
+        model_folder[0] = 0;
+        eng_model_dir = NULL;
+        eng_mtp_dir = NULL;
+        model_last_set(MODEL_LAST_FILE, "");
+        say("models: switching to built-in model");
+        return load_current_model(0, err_out, err_cap);
+    }
+    if (!model_name_ok(name)) {
+        if (err_out) snprintf(err_out, err_cap, "invalid model name");
+        return -2;
+    }
+    char dir[128], why[300], shown[160];
+    snprintf(dir, sizeof(dir), "%s/%s", MODELS_DIR, name);
+    if (model_check(ASSETS "/model.idx", dir, why, sizeof(why), shown, sizeof(shown))) {
+        if (err_out) snprintf(err_out, err_cap, "%s", why[0] ? why : "model not found or invalid");
+        return -2;
+    }
+    snprintf(model_dir, sizeof(model_dir), "%s", dir);
+    snprintf(model_folder, sizeof(model_folder), "%s", name);
+    eng_model_dir = model_dir;
+    eng_mtp_dir = NULL;
+#ifdef GARLIC_SPEC
+    if (model_check_mtp(ASSETS "/mtp.idx", model_dir, why, sizeof(why)) > 0) eng_mtp_dir = model_dir;
+#endif
+    model_last_set(MODEL_LAST_FILE, name);
+    say("models: switching to %s", name);
+    return load_current_model(0, err_out, err_cap);
+}
+
+static int model_choose(int allow_cancel) {
+    static char names[MODELS_MAX + 1][MODEL_NAME_MAX], notes[MODELS_MAX + 1][MODEL_NAME_MAX + 24];
+    const char* name_p[MODELS_MAX + 1];
+    const char* note_p[MODELS_MAX + 1];
+    char weights[64], last[MODEL_NAME_MAX], why[300], shown[160];
+    if (model_idx_file(ASSETS "/model.idx", weights, sizeof(weights))) return 0;
+    int n = models_scan(MODELS_DIR, weights, names + 1, MODELS_MAX);
+    if (n <= 0) return 0;   // no other model: the app starts as always
+    n++;                  // [0]: the built-in model
+    snprintf(names[0], MODEL_NAME_MAX, "%s", BUILTIN_NAME);
+    model_last_get(MODEL_LAST_FILE, last, sizeof(last));
+    int sel = has_flat_weights(weights) ? 0 : 1;
+    const char* cur = model_folder[0] ? model_folder : last;
+    for (int i = 0; i < n; i++) {
+        if (i) snprintf(notes[i], sizeof(notes[i]), "%s/%s", MODELS_DIR, names[i]);
+        name_p[i] = names[i];
+        note_p[i] = i ? notes[i] : tr(S_MODEL_BUILTIN);
+        if (i && !strcmp(names[i], cur)) sel = i;
+    }
+    say("models: %d in %s; chosen last: %s", n - 1, MODELS_DIR, cur[0] ? cur : "the built-in model");
+    uint32_t prev = read_buttons();   // (a button still down from the home screen is not a choice)
+    for (;;) {
+        uint32_t pressed = newly_pressed(&prev);
+        if ((pressed & ORBIS_PAD_BUTTON_UP) && sel > 0) sel--;
+        if ((pressed & ORBIS_PAD_BUTTON_DOWN) && sel < n - 1) sel++;
+        if (allow_cancel && (pressed & ORBIS_PAD_BUTTON_CIRCLE)) return 0;
+        if (pressed & ORBIS_PAD_BUTTON_CROSS) break;
+        draw_models(name_p, note_p, n, sel);
+        present();
+    }
+    if (!sel) {
+        if (allow_cancel && !model_folder[0]) return 0;   // already on built-in
+        say("models: the built-in model");
+        model_folder[0] = 0;
+        eng_model_dir = NULL;
+        eng_mtp_dir = NULL;
+        model_last_set(MODEL_LAST_FILE, "");
+        return 1;
+    }
+    if (allow_cancel && !strcmp(names[sel], model_folder)) return 0;   // already loaded
+    snprintf(model_dir, sizeof(model_dir), "%s/%s", MODELS_DIR, names[sel]);
+    if (model_check(ASSETS "/model.idx", model_dir, why, sizeof(why), shown, sizeof(shown))) {
+        say("models: %s cannot be used: %s. The built-in model starts.", model_dir, why);
+        if (!allow_cancel) model_last_set(MODEL_LAST_FILE, "");
+        for (prev = read_buttons();;) {
+            if (newly_pressed(&prev) & (ORBIS_PAD_BUTTON_CROSS | ORBIS_PAD_BUTTON_CIRCLE)) break;
+            draw_model_bad(names[sel], shown);
+            present();
+        }
+        return 0;
+    }
+    say("models: %s", why);
+    model_last_set(MODEL_LAST_FILE, names[sel]);
+    snprintf(model_folder, sizeof(model_folder), "%s", names[sel]);
+    eng_model_dir = model_dir;
+    eng_mtp_dir = NULL;
+#ifdef GARLIC_SPEC
+    int own = model_check_mtp(ASSETS "/mtp.idx", model_dir, why, sizeof(why));
+    if (own > 0) {
+        eng_mtp_dir = model_dir;
+        say("models: its own MTP head, %s", why);
+    } else {
+        say("models: the built-in MTP head drafts (%s%s)", own < 0 ? "its own does not match: " : "", why);
+    }
+#endif
+    return 1;
+}
+
+// The C library's own locks (malloc, free, realloc, the list of open files) do nothing until its pthread_create says
+// a second thread exists, and this app's threads come from scePthreadCreate (the API's server, the screens, the
+// microphone, Python, the voice). So malloc ran unlocked whenever two of them allocated at the same moment, which
+// breaks the heap. __lock checks threads_minus_1, the 4th int of __libc in this C library, and is a plain spin lock
+// (no futex), so turning it on before any thread starts is safe.
+extern struct { int can_do_threads, threaded, secure; volatile int threads_minus_1; } __libc;
+
 int main(void) {
+    __libc.threads_minus_1 = 1;
     if (rename(LOG_FILE, LOG_PREV)) unlink(LOG_FILE);   // the last log of this app is kept, as LOG_PREV
     say("starting");
     boot_report();
@@ -1906,53 +2144,29 @@ int main(void) {
     }
     sceSystemServiceHideSplashScreen();   // the system shows pic1.png until the app says it is drawing
     say("video and fonts ready");
-    loading((void*)tr(S_PREPARING), 0.0f, NULL);
-    size_t tsize;
-    uint8_t* tdata = read_all(ASSETS "/tokenizer.bin", &tsize);
-    if (!tdata || tok_load(&tok, tdata, tsize)) show_error("tokenizer.bin");
-    say("tokenizer: %u tokens", tok.n_vocab);
-    eng_margin_mb = 64 - ui_screen_pool_mb();   // (the screen block came out of the system's 64 MiB)
-    const char* eng_assets = ASSETS;
-    if (engine_init(&eng, eng_assets, loading, (void*)tr(S_LOADING_MODEL))) show_error(eng.error);
-    say("language model ready; GPU memory used %u of %u MiB; context cache %s, %u tokens (%u while voice mode "
-        "borrows %u MiB)", (unsigned)(eng.next >> 20), (unsigned)(eng.mem_size >> 20),
-        eng.tq ? "TurboQuant 4-bit" : "fp16 k + int8 v", eng.max_seq, eng.lend_ctx, (unsigned)(eng.kv_split >> 20));
-    if (t3_init(&eng, ASSETS) == 0) {   // text to speech, first half (Chatterbox T3)
-        say("T3 ready; GPU memory used %u of %u MiB", (unsigned)(eng.next >> 20), (unsigned)(eng.mem_size >> 20));
-    } else {
-        say("T3 not loaded: %s", eng.error);
-    }
-    loading((void*)tr(S_LOADING_VOICE), 0.99f, NULL);
-    if (asr_init(&eng, ASSETS) == 0)
-        say("speech to text ready: up to %u s of audio", eng.asr.max_frames * 8 / 100);
-    else
-        say("speech to text not available (missing or no GPU memory left)");
-    size_t flex0 = 0;   // system memory left (the 9B's dictation weights live there; Python borrows them)
-    ((int32_t(*)(size_t*))sceKernelAvailableFlexibleMemorySize)(&flex0);
-    say("GPU memory used: %u of %u MiB; system RAM free: %u MiB", (unsigned)(eng.next >> 20),
-        (unsigned)(eng.mem_size >> 20), (unsigned)(flex0 >> 20));
-#ifdef GARLIC_SPEC
-    if (spec_init(&eng, eng_assets) == 0) spec_lend();   // (before the start-up tests: they use it)
-    else say("spec: no MTP head (mtp.idx, the q4s model or a kernel missing)");
-#endif
-    kv_split_test();
-    tts_boot();
-    size_t flex1 = 0;
-    ((int32_t(*)(size_t*))sceKernelAvailableFlexibleMemorySize)(&flex1);
-    say("voice %s; system RAM free: %u MiB", tts_ready ? "ready" : "not available", (unsigned)(flex1 >> 20));
+    model_choose(0);   // (only if the models folder has another model for it)
+    load_current_model(1, NULL, 0);
     view.temperature = 0.7f;
     think_config();
-    api_set_model(MODEL_NAME);
+    api_tasks_init("/data/garlic/tasks.journal");
     api_config();   // the OpenAI-compatible API (api.h), if it was left on; its jobs run in the loop below
 
     uint32_t prev = 0;
     int scroll_held = 0;
     for (;;) {
+        api_console_busy(generating);   // (for GET /health; the modes below that keep the model say so before)
         ApiJob* api_job_now = !generating && !in_voice_mode ? api_take() : NULL;
         if (api_job_now) {   // an API request: the model answers it now, the chat waits
             api_job(api_job_now);
             api_done(api_job_now);
             prev = read_buttons();   // (a button still held from the wait is not a new press)
+        } else if (!generating && !in_voice_mode) {
+            GarlicTask tq_task;
+            if (api_task_claim(&tq_task) == 1) {
+                api_console_busy(1);
+                api_run_task(&tq_task);
+                prev = read_buttons();
+            }
         }
         uint32_t buttons = read_buttons();
         uint32_t pressed = buttons & ~prev;
@@ -1963,18 +2177,33 @@ int main(void) {
         } else if (pressed & (ORBIS_PAD_BUTTON_CROSS | ORBIS_PAD_BUTTON_OPTIONS)) {
             static char text[2048];
             int cross = (pressed & ORBIS_PAD_BUTTON_CROSS) != 0;
+            api_console_busy(1);
             if (cross ? keyboard(text, 1500, 0) : ask_user(text, sizeof(text))) {
                 say("user wrote %d bytes", (int)strlen(text));
                 start_turn(text);
             }
             prev = read_buttons();
+        } else if (pressed & (ORBIS_PAD_BUTTON_LEFT | ORBIS_PAD_BUTTON_RIGHT)) {
+            api_console_busy(1);
+            if (model_choose(1)) {
+                char err[160] = {0};
+                if (load_current_model(0, err, sizeof(err)) == 0) {
+                    say("models: switched to %s", MODEL_SHOWN);
+                } else {
+                    show_error(err[0] ? err : "failed to load model");
+                }
+            }
+            prev = read_buttons();
         } else if (pressed & ORBIS_PAD_BUTTON_L1) {
+            api_console_busy(1);
             voice_mode();
             prev = read_buttons();
         } else if ((pressed & ORBIS_PAD_BUTTON_R1) && code_msg() >= 0) {
+            api_console_busy(1);
             run_python();
             prev = read_buttons();
         } else if (pressed & ORBIS_PAD_BUTTON_SQUARE) {
+            api_console_busy(1);
             push_to_talk();
             prev = read_buttons();
         } else if (pressed & ORBIS_PAD_BUTTON_TRIANGLE) {

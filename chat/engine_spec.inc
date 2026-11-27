@@ -90,7 +90,8 @@ int spec_init(Engine* e, const char* dir) {
     memcpy(&s->nd, d + 4, 4);
     memcpy(s->path, d + 8, 128);
     s->path[128] = 0;
-    weights_locate(s->path);
+    if (eng_mtp_dir) weights_in(s->path, eng_mtp_dir);
+    else weights_locate(s->path);
     memcpy(&s->wsize, d + 136, 8);
     memcpy(&s->tsize, d + 144, 8);
     for (int i = 0; i < MT_N; i++) {
