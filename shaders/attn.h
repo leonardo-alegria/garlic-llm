@@ -25,6 +25,22 @@
 #undef KSTRIDE
 #undef SPLIT_ARG
 #undef KV_AT
+#undef WINDOW_ARG
+#undef WBLK0
+#undef WSTART
+#undef WVALID
+// With ATTN_WINDOW (sliding-window attention, Maple): attn_part takes the first block and the first position of the
+// window (two more arguments) and leaves out earlier positions; the cache is a ring of MAX_SEQ positions.
+#ifdef ATTN_WINDOW
+#define WINDOW_ARG , uint blk0, uint pstart
+#define WBLK0 blk0
+#define WSTART pstart
+#else
+#define WINDOW_ARG
+#define WBLK0 0u
+#define WSTART 0u
+#endif
+#define WVALID(l) ((l) < cnt && p0 + (l) >= WSTART)
 #ifdef ATTN_SPLIT
 #define KSTRIDE (MAX_SEQ / 2)                  // positions per half
 #define SPLIT_ARG , ulong split
@@ -97,10 +113,14 @@ void ATTN_NAME(qk_rope_cache)(global float* qkv, global const float* q_norm, glo
         for (uint m = 0; m < EPT; m++) {
             uint i = j + 64 * m;
             float y = x[m];
+#if ROPE_DIM > 0
             if (i < ROPE_DIM) {
                 float c = rp[i % rh], s = rp[rh + i % rh];
                 y = i < rh ? y * c - hv[i + rh] * s : y * c + hv[i - rh] * s;
             }
+#else
+            (void)rp, (void)rh;   // (no RoPE: Maple's global layers)
+#endif
             if (g < n_heads) h[i] = y;
             else kcache[((ulong)(g - n_heads) * HEAD_DIM + i) * KSTRIDE + lp] = (half_t)y;
         }
@@ -139,7 +159,7 @@ void ATTN_NAME(qk_rope_cache)(global float* qkv, global const float* q_norm, glo
 // the unnormalised output [n_heads][ATT_MAX_BLOCKS][HEAD_DIM], then max m and sum s [n_heads][ATT_MAX_BLOCKS].
 kernel __attribute__((reqd_work_group_size(256, 1, 1)))
 void ATTN_NAME(attn_part)(global const float* q, global const half_t* kcache, global const half_t* vcache, global float* part,
-               global float* out, uint pos, uint n_heads, uint n_kv, float scale SPLIT_ARG) {
+               global float* out, uint pos, uint n_heads, uint n_kv, float scale SPLIT_ARG WINDOW_ARG) {
     local float qd[GQ_MAX][HEAD_DIM];
     local float ps[4][GQ_MAX][ATT_BLOCK];      // per-wave partial scores
     local float w[GQ_MAX][ATT_BLOCK];          // softmax weights exp(score - max)
@@ -147,7 +167,7 @@ void ATTN_NAME(attn_part)(global const float* q, global const half_t* kcache, gl
     local float acc[4][GQ_MAX][HEAD_DIM];      // per-wave partial outputs
     uint t = LID, wv = t >> 6, lane = t & 63;
     uint kv = GID % n_kv, blk = GID / n_kv, gq = n_heads / n_kv, n = pos + 1;
-    uint p0 = blk * ATT_BLOCK, cnt = n - p0 < ATT_BLOCK ? n - p0 : ATT_BLOCK;
+    uint p0 = (blk + WBLK0) * ATT_BLOCK, cnt = n - p0 < ATT_BLOCK ? n - p0 : ATT_BLOCK;
     int direct = n <= ATT_BLOCK;
     uint lp0 = p0 % KSTRIDE;   // a block never straddles the two halves (ATT_BLOCK divides KSTRIDE)
     kcache = (global const half_t*)KV_AT(kcache, p0);
@@ -158,7 +178,7 @@ void ATTN_NAME(attn_part)(global const float* q, global const half_t* kcache, gl
     BARRIER();
 
     float a[GQ_MAX] = {0.0f, 0.0f, 0.0f, 0.0f};
-    if (lane < cnt) {
+    if (WVALID(lane)) {
         global const half_t* k = kcache + ((ulong)kv * HEAD_DIM + wv * DPW) * KSTRIDE + lp0 + lane;
 #pragma unroll
         for (uint i = 0; i < DPW; i++) {
@@ -170,7 +190,7 @@ void ATTN_NAME(attn_part)(global const float* q, global const half_t* kcache, gl
     BARRIER();
 
     // softmax over the block: wave wv = head wv
-    float sc = lane < cnt ? ps[0][wv][lane] + ps[1][wv][lane] + ps[2][wv][lane] + ps[3][wv][lane] : -3.0e38f;
+    float sc = WVALID(lane) ? ps[0][wv][lane] + ps[1][wv][lane] + ps[2][wv][lane] + ps[3][wv][lane] : -3.0e38f;
     red[wv][lane] = sc;
     BARRIER();
     for (uint st = 32; st > 0; st >>= 1) {
@@ -179,7 +199,7 @@ void ATTN_NAME(attn_part)(global const float* q, global const half_t* kcache, gl
     }
     float m = red[wv][0];
     BARRIER();
-    float e = lane < cnt ? exp_(sc - m) : 0.0f;
+    float e = WVALID(lane) ? exp_(sc - m) : 0.0f;
     w[wv][lane] = e;
     red[wv][lane] = e;
     BARRIER();
