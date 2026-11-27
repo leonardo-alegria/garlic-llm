@@ -221,3 +221,30 @@ Garlic LLM is built by [Leonardo Alegría](https://www.linkedin.com/in/leonardoa
 ---
 
 Not affiliated with or endorsed by Sony Interactive Entertainment. PlayStation and PS4 are trademarks of their owners.
+
+---
+
+## Changes in this branch (20261127)
+
+This tree carries the following modifications on top of upstream, all verified working on hardware:
+
+1. **Voice/speech subsystem removed** (2026-11-22): dictation, TTS and the voice UI are gone;
+   keyboard hints and footers retuned; the MTP head gets its own GPU block instead of borrowing
+   the removed voice stack.
+2. **Conversation keep-alive on the API** (keepctx ×3): follow-up requests re-feed only the new
+   messages onto the engine's existing conversation state instead of prefilling from zero.
+3. **Model directory + hot-swap** (2026-11-27): `/data/garlic.manifest.txt` declares named models
+   (`<name> [idx path]`), `/data/garlic_model.txt` picks the boot model, `GET /v1/models` lists all
+   of them, and `POST /v1/model {"name": "..."}` hot-swaps at runtime — the new `.idx` is validated
+   against the live model (all records byte-equal) before anything is overwritten, then the arena is
+   remounted in place. Swapping forces a fresh conversation on the next request.
+4. **32K context variant**: shader `MAX_SEQ` 16384 with the engine generalized by the `.idx`'s
+   `max_seq` (two split KV blocks), context sized live at boot from the GPU room actually left.
+   Verified boot: ~4.34 GB of 4.4 GiB GPU used, TurboQuant 4-bit cache for 32,768 tokens.
+
+Provenance scripts sit at the branch root (`patch-20261122.py → keepctx-20261122.py →
+keepctx2-20261123.py → keepctx3-20261123.py → swap-neutral-label-20261122.py →
+patch-20261127-modeldir.py → patch-20261127-ctxfit.py → patch-20261127-final-edits.py`).
+They are history, not a build path: the sources here are already patched; build normally with
+`./build_chat.py` (kernel regeneration needs a Zig toolchain via `GARLIC_TOOLCHAIN`;
+`chat/assets_9b/kernels.bin` ships prebuilt).

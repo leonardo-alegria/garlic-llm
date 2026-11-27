@@ -5,7 +5,7 @@
 // it (GARLIC_SPEC), and Circle on the controller stops it. What the screen shows meanwhile is main.c's part
 // (api_chat_begin / _reply / _step / _end).
 
-#define API_IDS 16384             // tokens a job's prompt may have: the longest context of the app
+#define API_IDS 24576             // tokens a job's prompt may have: the longest context of the app
 #define API_TAIL 32               // kept free for the assistant's turn after the messages (at most 17 tokens)
 static uint32_t api_ids[API_IDS];   // the prompt of a job
 
@@ -38,10 +38,11 @@ static int api_send_event(int fd, const char* json) {
 // thought block (as the chat does, enable_thinking=false). Returns the number of ids, -1 if a message is malformed,
 // or -2 if the messages do not fit API_IDS. The limit counts tokens, not bytes: a long conversation may use the
 // whole context. (Every token stands for one byte or more, so the tail after the messages always fits API_TAIL.)
-static int api_prompt(const JNode* pool, const ChatRequest* cr) {
+static int api_prompt(const JNode* pool, const ChatRequest* cr, int skip) {
     const int cap = API_IDS - API_TAIL;   // where the messages must end
     int n = 0;
-    for (int m = pool[cr->messages].first; m >= 0; m = pool[m].next) {
+    for (int m = pool[cr->messages].first, i = 0; m >= 0; m = pool[m].next, i++) {
+        if (i < skip) continue;   // (already in the engine's state: only the new messages are fed)
         Sb content;
         sb_init(&content);
         char role[16] = "user";
@@ -76,6 +77,22 @@ static int api_prompt(const JNode* pool, const ChatRequest* cr) {
     return n;
 }
 
+// Upper bound on the tokens the messages from `skip` on will take (a token is at least one byte;
+    // plus the wrapper per message and the assistant header).
+static int api_prompt_max(const JNode* pool, const ChatRequest* cr, int skip) {
+    int n = 0, i = 0;
+    for (int m = pool[cr->messages].first; m >= 0; m = pool[m].next, i++) {
+        if (i < skip) continue;
+        Sb c;
+        sb_init(&c);
+        char role[16] = "user";
+        if (api_message(pool, m, role, sizeof(role), &c) || c.oom) return API_IDS;   // (unknown: no continuation)
+        n += (int)c.n + (int)strlen(role) + 8;
+        sb_free(&c);
+    }
+    return n + 64;
+}
+
 static void api_error(int fd, const char* status_line, const char* message, const char* type, const char* code) {
     Sb s;
     sb_init(&s);
@@ -93,6 +110,7 @@ static void api_error(int fd, const char* status_line, const char* message, cons
 
 static void api_job(ApiJob* job) {
     static unsigned api_count;
+    static int api_pos, api_msgs_fed;   // the conversation on the engine: where it ends, messages fed
     JNode* pool = malloc(sizeof(JNode) * API_MAX_NODES);
     ChatRequest cr;
     const char* err = NULL;
@@ -102,7 +120,13 @@ static void api_job(ApiJob* job) {
                   "invalid_body");
         return;
     }
-    int n = api_prompt(pool, &cr);
+    int mcount = 0;
+    for (int m = pool[cr.messages].first; m >= 0; m = pool[m].next) mcount++;
+    // keep the conversation: the engine's state holds the earlier requests when nothing typed on the
+    // screen took the room since. the client's whole history is then fed from where it stopped.
+    int cont = !api_break && api_pos > 0 && api_pos == pos && api_msgs_fed > 0 && api_msgs_fed < mcount &&
+               pos + api_prompt_max(pool, &cr, api_msgs_fed) + cr.max_tokens + 2 <= (int)eng.ctx_limit;
+    int n = api_prompt(pool, &cr, cont ? api_msgs_fed : 0);
     if (n == -1) {
         free(pool);
         api_error(job->fd, "HTTP/1.1 400 Bad Request", "A message is malformed: it needs a 'role', and 'content' must "
@@ -116,20 +140,42 @@ static void api_job(ApiJob* job) {
         return;
     }
     free(pool);
-    if (n + cr.max_tokens + 2 > (int)eng.ctx_limit) {
+    if (!cont && n + cr.max_tokens + 2 > (int)eng.ctx_limit) {
         api_error(job->fd, "HTTP/1.1 400 Bad Request", "The messages and max_tokens do not fit the context window.",
+                  "invalid_request_error", "context_length_exceeded");
+        return;
+    }
+    if (cont && pos + n + cr.max_tokens + 2 > (int)eng.ctx_limit) {
+        api_error(job->fd, "HTTP/1.1 400 Bad Request", "The conversation and max_tokens do not fit the context window anymore.",
                   "invalid_request_error", "context_length_exceeded");
         return;
     }
     // the model answers this request: the conversation on screen starts again from nothing (a request refused
     // above leaves it as it was)
-    pos = 0;
-    need_close = 0;
+    if (!cont) {
+        pos = 0;
+        need_close = 0;
+    }
     hist_n = hist_done = 0;
     thinking = think_turn = 0;
     sys_pre = 0;
     view.scroll = 0;
     api_chat_begin();   // (clears the conversation: a note says that a request is being answered)
+    if (cont && need_close) {   // the last answer's end token was sampled but never fed (as the chat does)
+        static uint32_t close_ids[2];
+        if (!close_ids[0]) {
+            close_ids[0] = IM_END;
+            uint32_t one[8];
+            encode_into(one, 0, 8, "\n");
+            close_ids[1] = one[0];
+        }
+        if (engine_run(&eng, close_ids, 2, pos, 0.0f, 1, &next_token)) {
+            api_error(job->fd, "HTTP/1.1 500 Internal Server Error", eng.error, "server_error", NULL);
+            free(pool);
+            return;
+        }
+        pos += 2;
+    }
     if (cr.has_seed) seed = cr.seed;
     char id[32];
     snprintf(id, sizeof(id), "chatcmpl-%u", ++api_count);
@@ -137,14 +183,17 @@ static void api_job(ApiJob* job) {
     long long created = (long long)time(NULL);
     say("api: prompt of %d tokens, up to %d new, T %.2f%s", n, cr.max_tokens, cr.temperature,
         cr.stream ? ", streamed" : "");
-    engine_reset(&eng);
-    if (engine_run(&eng, api_ids, n, 0, (float)cr.temperature, seed++, &next_token)) {
+    if (!cont) engine_reset(&eng);   // (continuing: the Gated DeltaNet states stay)
+    api_break = 0;   // a swap's forced fresh start is consumed by this processed request
+    if (engine_run(&eng, api_ids, n, pos, (float)cr.temperature, seed++, &next_token)) {
         api_error(job->fd, "HTTP/1.1 500 Internal Server Error", eng.error, "server_error", NULL);
-        pos = 0;
+        pos = cont ? pos : 0;
         api_chat_end();
         return;
     }
-    pos = n;
+    pos += n;
+    api_pos = pos, api_msgs_fed = mcount;   // this conversation is now on the engine up to pos
+    need_close = 1;   // the answer's end token will be sampled but not fed: the next request closes it
 
     int fd = job->fd, streamed = 0, client_gone = 0, error = 0;
     if (cr.stream) {
@@ -260,8 +309,9 @@ static void api_job(ApiJob* job) {
     }
     sb_free(&text);
     sb_free(&pend);
-    // the engine's state is this request's; the conversation on screen starts again at position 0
-    pos = 0;
-    need_close = 0;
+    // keepctx3: the sampling loop left pos at prompt+answer; the engine conversation ends
+    //  right there and stays that way. A request that starts over is reset by the !cont block
+    //  up front (pos and the engine together); nothing here may touch pos or the end is dead.
+    api_pos = pos, api_msgs_fed = mcount;   // refresh: conversation now ends past the sampled answer
     api_chat_end();
 }

@@ -25,6 +25,7 @@ typedef struct {
 
 typedef void (*ProgressFn)(void* user, float fraction, const char* what);
 
+#if 0  // speech structs removed 2026-11-22
 // Speech to text: Parakeet TDT 0.6B v3 (assets/asr.idx, asr_vocab.bin; weights in /data), in the GPU memory left
 // after the language model.
 typedef struct {
@@ -135,6 +136,7 @@ typedef struct {
     int step;
     double last_seconds;        // time of the last whole sentence
 } S3G;
+#endif
 
 typedef struct {
     // model shape (assets/model.idx)
@@ -218,11 +220,11 @@ typedef struct {
     int swar_n;
     uint32_t init_state[256];
     uint64_t tsc_freq;
+    uint64_t ws_begin, ws_end;   // GPU slab the thinking turn copies the DeltaNet state into (the room the speech models used to take)
     double last_gpu_seconds;
+    uint32_t idx_max_seq;       // max_seq the .idx gives, before TurboQuant doubles e->max_seq (engine_swap's compare)
+    char model_name[64];        // name of the loaded model ("" = the default) — evidence for /v1/models + the swap
     char error[160];
-    Asr asr;
-    T3 t3;
-    S3G s3;
 } Engine;
 
 // Direct memory engine_init leaves to the system (MiB; main.c sets it before engine_init).
@@ -301,7 +303,6 @@ int engine_spec_step(Engine* e, uint32_t tok, int pos, float temperature, uint32
 void spec_stats(const Engine* e, char* buf, int n);
 void spec_stats_reset(void);
 // T3's weights read again into their memory (after the head borrowed it).
-int t3_reload(Engine* e);
 // The draft length cap (0 = the head off; k < 0 keeps it); returns the old one.
 int spec_kmax(int k);
 float spec_theta(float theta);   // the draft's stop threshold (theta < 0 keeps it); returns the old one
