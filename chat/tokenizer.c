@@ -65,6 +65,17 @@ static int find_merge(const Tokenizer* t, uint32_t a, uint32_t b, uint32_t* merg
 
 // ---- Unicode helpers -------------------------------------------------------------------------------------------
 
+void tok_free(Tokenizer* t) {
+    if (!t) return;
+    free((void*)t->raw);
+    free(t->raw_len);
+    free(t->special);
+    free(t->keys);
+    free(t->rank);
+    free(t->merged);
+    memset(t, 0, sizeof(*t));
+}
+
 static uint32_t next_cp(const uint8_t* s, int n, int i, int* len) {
     uint8_t c = s[i];
     int l = c < 0x80 ? 1 : (c >> 5) == 6 ? 2 : (c >> 4) == 14 ? 3 : (c >> 3) == 30 ? 4 : 1;
@@ -171,9 +182,13 @@ static int pretoken(const uint8_t* s, int n, int i) {
     return l0;
 }
 
+// ---- merging one pre-token -------------------------------------------------------------------------------------
+// As Hugging Face's BPE does it: the adjacent pair with the lowest merge rank is merged (of equal ones the leftmost),
+// again and again, until no pair has a merge.
+
+// A pre-token of up to 512 bytes (nearly all of them): on the stack, each merge found by a look at every pair.
 static int bpe(const Tokenizer* t, const uint8_t* s, int n, uint32_t* out, int max) {
-    uint32_t buf[512];
-    if (n > 512) n = 512;
+    uint32_t buf[512];   // (n <= 512: longer ones go to bpe_long)
     for (int i = 0; i < n; i++) buf[i] = t->byte_id[s[i]];
     int len = n;
     for (;;) {
@@ -197,12 +212,131 @@ static int bpe(const Tokenizer* t, const uint8_t* s, int n, uint32_t* out, int m
     return len;
 }
 
+// A longer pre-token: a run without spaces of letters (Thai or Chinese without punctuation, "aaaa..."), of symbols
+// (a line of "=", emoji) or of spaces and line breaks. The same merges in the same order, with a heap of the pairs,
+// in windows of BPE_WINDOW bytes, so the work memory stays small whatever the length (40 bytes a byte of the window:
+// 160 KiB, freed after the pre-token):
+// - a window's tokens are kept up to BPE_MARGIN bytes before its end (all of them in the last window), and the next
+//   window begins where the last token kept ends;
+// - BPE's tokens are a sequence in which every two neighbours are exactly what BPE makes of the two together. A
+//   window's tokens are, so where the last token kept and the next window's first are such a pair too, the tokens
+//   are the whole pre-token's. Where they are not, the last token kept is given back and read again with the next
+//   window (while what was given back is under half of what a window keeps, so the next one still goes further).
+#define BPE_WINDOW 4096
+#define BPE_MARGIN 512            // (4 times Qwen's longest token, 128 bytes)
+#define BPE_DEAD 0xFFFFFFFFu      // a symbol merged into the one before it
+
+typedef struct {
+    uint32_t rank;
+    int32_t pos;                  // the pair's first symbol (its first byte in the window)
+} BpePair;
+
+static int pair_before(BpePair a, BpePair b) { return a.rank < b.rank || (a.rank == b.rank && a.pos < b.pos); }
+
+static void heap_push(BpePair* h, int* n, BpePair v) {
+    int i = (*n)++;
+    while (i > 0 && pair_before(v, h[(i - 1) / 2])) {
+        h[i] = h[(i - 1) / 2];
+        i = (i - 1) / 2;
+    }
+    h[i] = v;
+}
+
+static BpePair heap_pop(BpePair* h, int* n) {
+    BpePair top = h[0], v = h[--*n];
+    int i = 0;
+    for (;;) {
+        int c = 2 * i + 1;
+        if (c >= *n) break;
+        if (c + 1 < *n && pair_before(h[c + 1], h[c])) c++;
+        if (!pair_before(h[c], v)) break;
+        h[i] = h[c];
+        i = c;
+    }
+    h[i] = v;
+    return top;
+}
+
+// The pair of symbol p and the next one onto the heap, if it has a merge.
+static void push_pair(const Tokenizer* t, const uint32_t* id, const int32_t* next, BpePair* h, int* hn, int p) {
+    uint32_t m;
+    int r = find_merge(t, id[p], id[next[p]], &m);
+    if (r >= 0) heap_push(h, hn, (BpePair){(uint32_t)r, p});
+}
+
+// BPE of s (n <= win bytes) into ids, in the work memory of a window of win bytes. Returns the number of tokens.
+static int bpe_heap(const Tokenizer* t, void* mem, int win, const uint8_t* s, int n, uint32_t* ids) {
+    uint32_t* id = mem;                     // the symbol that begins at each byte (BPE_DEAD: none)
+    int32_t* next = (int32_t*)(id + win);   // the next and the previous symbol (-1: none)
+    int32_t* prev = next + win;
+    BpePair* heap = (BpePair*)(prev + 2 * win);   // (after ids: up to 3 pairs a byte, n - 1 at first, 2 a merge)
+    int hn = 0;
+    for (int i = 0; i < n; i++) id[i] = t->byte_id[s[i]], next[i] = i + 1 < n ? i + 1 : -1, prev[i] = i - 1;
+    for (int i = 0; i + 1 < n; i++) push_pair(t, id, next, heap, &hn, i);
+    while (hn) {
+        BpePair top = heap_pop(heap, &hn);
+        int p = top.pos, q = next[p];
+        uint32_t m;
+        // (a pair whose symbols have changed since it was pushed is left out: its rank is not the same any more)
+        if (id[p] == BPE_DEAD || q < 0 || find_merge(t, id[p], id[q], &m) != (int)top.rank) continue;
+        id[p] = m, id[q] = BPE_DEAD;
+        next[p] = next[q];
+        if (next[p] >= 0) prev[next[p]] = p;
+        if (prev[p] >= 0) push_pair(t, id, next, heap, &hn, prev[p]);
+        if (next[p] >= 0) push_pair(t, id, next, heap, &hn, p);
+    }
+    int k = 0;
+    for (int p = 0; p >= 0; p = next[p]) ids[k++] = id[p];
+    return k;
+}
+
+// 1 if BPE leaves the neighbours a, b as they are: the bytes of a then those of b make exactly a and b.
+static int pair_kept(const Tokenizer* t, uint32_t a, uint32_t b) {
+    uint8_t s[512];
+    uint32_t ids[3];
+    int la = t->raw_len[a], lb = t->raw_len[b];
+    if (la + lb > 512) return 1;   // (no two tokens are that long together: Qwen's longest has 128 bytes)
+    memcpy(s, t->raw[a], la);
+    memcpy(s + la, t->raw[b], lb);
+    return bpe(t, s, la + lb, ids, 3) == 2 && ids[0] == a && ids[1] == b;
+}
+
+static int bpe_long(const Tokenizer* t, const uint8_t* s, int n, uint32_t* out, int max) {
+    int win = n < BPE_WINDOW ? n : BPE_WINDOW;
+    void* mem = malloc((size_t)win * 40);   // id, next, prev, ids (4 bytes each), the heap (3 pairs of 8)
+    uint32_t small[512];
+    int margin = BPE_MARGIN;
+    uint32_t* ids = mem ? (uint32_t*)mem + 3 * win : small;
+    if (!mem) win = 512, margin = 256;   // (out of memory: windows of 512 bytes as the short pre-tokens, slower)
+    int count = 0, at = 0, backed = 0;   // out[0, count) is s[0, at); backed: bytes given back since then
+    while (at < n && count < max) {
+        int len = n - at < win ? n - at : win;
+        int k = mem ? bpe_heap(t, mem, win, s + at, len, ids) : bpe(t, s + at, len, ids, len);
+        if (count > 0 && !pair_kept(t, out[count - 1], ids[0]) &&
+            backed + t->raw_len[out[count - 1]] < (win - margin) / 2) {
+            count--;   // (the last token kept is read again with this window)
+            at -= t->raw_len[out[count]];
+            backed += t->raw_len[out[count]];
+            continue;
+        }
+        int keep = 0, end = 0;   // the tokens kept: all in the last window, else those before the margin (one at least)
+        while (keep < k && keep < max - count &&
+               (at + len == n || keep == 0 || end + t->raw_len[ids[keep]] <= len - margin))
+            end += t->raw_len[ids[keep++]];
+        memcpy(out + count, ids, (size_t)keep * sizeof(uint32_t));
+        count += keep, at += end, backed = 0;
+    }
+    free(mem);
+    return count;
+}
+
 int tok_encode(const Tokenizer* t, const char* utf8, uint32_t* out, int max) {
     const uint8_t* s = (const uint8_t*)utf8;
     int n = (int)strlen(utf8), i = 0, count = 0;
     while (i < n && count < max) {
         int l = pretoken(s, n, i);
-        count += bpe(t, s + i, l, out + count, max - count);
+        if (l <= 512) count += bpe(t, s + i, l, out + count, max - count);
+        else count += bpe_long(t, s + i, l, out + count, max - count);
         i += l;
     }
     return count;
