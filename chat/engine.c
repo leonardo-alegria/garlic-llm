@@ -263,11 +263,78 @@ static int load_kernels(Engine* e, const char* dir) {
     return e->k_embed && e->k_rmsnorm && e->k_qk && e->k_attn && e->k_attn_comb && e->k_silu && e->k_add && e->k_mv && e->k_sample ? 0 : -1;
 }
 
+// Which .idx a model name means: /data/garlic.manifest.txt line "<name> [idx path]"; a name without a line
+// (or no manifest) = /data/<name>.idx. Names: 1..63 of [A-Za-z0-9._-]. 0 = path written, -1 = bad name.
+static int model_idx_path(char* out, size_t cap, const char* name) {
+    if (!name || !name[0]) return -1;
+    for (int i = 0; name[i]; i++) {
+        if (i >= 63) return -1;
+        int c = (unsigned char)name[i];
+        int ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+                 c == '.' || c == '_' || c == '-';
+        if (!ok) return -1;
+    }
+    size_t fs;
+    char* mf = (char*)read_file("/data/garlic.manifest.txt", &fs);
+    char custom[256];
+    custom[0] = 0;
+    if (mf && fs) {
+        char* p = mf;
+        while ((size_t)(p - mf) < fs) {
+            char* q = p;
+            while ((size_t)(q - mf) < fs && *q != '\n') q++;
+            char* sp = p;
+            while (sp < q && *sp != ' ') sp++;
+            size_t nlen = (size_t)(sp - p);
+            if (nlen == strlen(name) && !strncmp(p, name, nlen)) {
+                char* path2 = sp < q ? sp + 1 : NULL;
+                while (path2 && (*path2 == ' ' || *path2 == '\r')) path2++;
+                if (path2 && *path2 && *path2 == '/' && (size_t)(q - path2) < 250) {
+                    size_t l = (size_t)(q - path2);
+                    while (l && (path2[l - 1] == ' ' || path2[l - 1] == '\r')) l--;
+                    memcpy(custom, path2, l);
+                    custom[l] = 0;
+                }
+                break;
+            }
+            p = q + 1;
+        }
+    }
+    free(mf);
+    if (custom[0]) snprintf(out, cap, "%s", custom);
+    else snprintf(out, cap, "/data/%s.idx", name);
+    return 0;
+}
+
 static int load_index(Engine* e, const char* dir) {
     char path[256];
     size_t size;
-    snprintf(path, sizeof(path), "%s/model.idx", dir);
-    uint8_t* d = read_file(path, &size);
+    uint8_t* d = NULL;
+    {   // /data/garlic_model.txt = name (or a full .idx path): which model boots
+        char* sw = (char*)read_file("/data/garlic_model.txt", &size);
+        char nm[80];
+        nm[0] = 0;
+        if (sw) {
+            int k = 0;
+            while (k < 79 && sw[k] && sw[k] <= 32) k++;
+            int j = 0;
+            while (j < 79 && sw[k] > 32) nm[j++] = sw[k++];
+            nm[j] = 0;
+            free(sw);
+        }
+        if (nm[0] && model_idx_path(path, sizeof(path), nm) == 0) {
+            d = read_file(path, &size);
+            if (d && (memcmp(d, "PMDL", 4) && memcmp(d, "PMQ5", 4))) {
+                free(d);
+                d = NULL;
+            }
+            if (d) snprintf(e->model_name, sizeof(e->model_name), "%s", nm);
+        } else if (!nm[0]) d = read_file("/data/model.idx", &size);   // a model dropped on the HDD wins
+    }
+    if (!d || (memcmp(d, "PMDL", 4) && memcmp(d, "PMQ5", 4))) {
+        snprintf(path, sizeof(path), "%s/model.idx", dir);
+        d = read_file(path, &size);
+    }
     if (!d || (memcmp(d, "PMDL", 4) && memcmp(d, "PMQ5", 4))) {
         fail(e, "cannot read %s", path);
         return -1;
@@ -277,11 +344,18 @@ static int load_index(Engine* e, const char* dir) {
     memcpy(v, d + 4, 40);
     e->n_layers = v[0], e->hidden = v[1], e->inter = v[2], e->n_heads = v[3], e->n_kv = v[4];
     e->head_dim = v[5], e->vocab = v[6], e->max_seq = v[7], e->eos = v[8], e->eos2 = v[9];
+    e->idx_max_seq = v[7];
     memcpy(&e->eps, d + 44, 4);
     memcpy(&e->rope_theta, d + 48, 4);
     memcpy(e->weights_path, d + 52, 128);
     e->weights_path[128] = 0;
     weights_locate(e->weights_path);
+    if (!e->model_name[0]) {   // no boot pick: the weights' own name is what the UI and /v1/models show
+        const char* b = strrchr(e->weights_path, '/');
+        snprintf(e->model_name, sizeof(e->model_name), "%s", b ? b + 1 : e->weights_path);
+        char* dot = strrchr(e->model_name, '.');
+        if (dot) *dot = 0;
+    }
     memcpy(&e->weights_size, d + 180, 8);
     memcpy(&e->n_tensors, d + 188, 4);
     uint32_t rec0 = 192, vocab_map = 0;
@@ -328,6 +402,156 @@ static int load_index(Engine* e, const char* dir) {
 // TurboQuant 4-bit KV cache (shaders/attn_tq.h): the 16 Lloyd-Max levels for the coordinates of a rotated head of
 // 256, the 15 boundaries between them, 0, then the 8 words of random sign bits; as float bit patterns, from
 // pc/turboquant.py (python -c "import turboquant as t; print(t.c_table())")
+// Hot-swap: a candidate model's weights go over the model block that is already mapped (no unmap, no reboot).
+// Its .idx must give the identical shape and record table (class-identical by construction); after the copy the
+// conversation starts fresh: engine_reset + api_run.inc's api_break makes the next API request a new one.
+int engine_swap(Engine* e, const char* name) {
+    if (e->model_name[0] && !strcmp(e->model_name, name)) {   // asked for what is already loaded
+        say("swap: %s already loaded", name);
+        return 0;
+    }
+    char path[256];
+    size_t size;
+    if (model_idx_path(path, sizeof(path), name)) {
+        fail(e, "swap: bad model name");
+        return -1;
+    }
+    uint8_t* d = read_file(path, &size);
+    if (!d || (memcmp(d, "PMDL", 4) && memcmp(d, "PMQ5", 4))) {
+        fail(e, "swap: cannot read model index %s", path);
+        return -1;
+    }
+    int q35 = !memcmp(d, "PMQ5", 4);
+    if (q35 != (e->qwen35 != 0)) {
+        free(d);
+        fail(e, "swap: model family differs (PMDL/PMQ5)");
+        return -1;
+    }
+    uint32_t v[10];
+    memcpy(v, d + 4, 40);
+    if (v[0] != e->n_layers || v[1] != e->hidden || v[2] != e->inter || v[3] != e->n_heads || v[4] != e->n_kv ||
+        v[5] != e->head_dim || v[6] != e->vocab || v[7] != e->idx_max_seq || v[8] != e->eos || v[9] != e->eos2) {
+        free(d);
+        fail(e, "swap: shape differs");
+        return -1;
+    }
+    float eps2, th2;
+    memcpy(&eps2, d + 44, 4);
+    memcpy(&th2, d + 48, 4);
+    if (eps2 != e->eps || th2 != e->rope_theta) {
+        free(d);
+        fail(e, "swap: eps/theta differ");
+        return -1;
+    }
+    uint64_t wsize;
+    uint32_t nten;
+    memcpy(&wsize, d + 180, 8);
+    memcpy(&nten, d + 188, 4);
+    if (wsize != e->weights_size || nten != e->n_tensors) {
+        free(d);
+        fail(e, "swap: sizes differ");
+        return -1;
+    }
+    uint32_t rec0 = 192;
+    if (q35) {
+        uint32_t x[8];
+        memcpy(x, d + 192, 32);
+        if (x[0] != e->n_kh || x[1] != e->n_vh || x[2] != e->dk || x[3] != e->dv || x[4] != e->rope_dim ||
+            x[5] != e->full_mask || x[6] != e->im_start || (x[7] & 1) != (uint32_t)e->has_head ||
+            ((x[7] >> 1) & 1) != (uint32_t)e->cpu_embed || ((x[7] >> 2) & 1) != (uint32_t)(e->ids != NULL)) {
+            free(d);
+            fail(e, "swap: qwen3.5 block differs");
+            return -1;
+        }
+        rec0 = 224;
+    }
+    for (uint32_t i = 0; i < nten; i++) {
+        const uint8_t* r = d + rec0 + i * 36;
+        const Tensor* t = &e->t[i];
+        uint64_t v1, v2, v3;
+        uint32_t v4, v5, v6;
+        memcpy(&v1, r, 8);
+        memcpy(&v2, r + 8, 8);
+        memcpy(&v4, r + 16, 4);
+        memcpy(&v5, r + 20, 4);
+        memcpy(&v3, r + 24, 8);
+        memcpy(&v6, r + 32, 4);
+        if (v1 != t->off || v2 != t->size || v4 != t->rows || v5 != t->cols || v3 != t->scales || v6 != t->fmt) {
+            free(d);
+            fail(e, "swap: record %u differs", i);
+            return -1;
+        }
+    }
+    char wp[129];
+    memcpy(wp, d + 52, 128);
+    wp[128] = 0;
+    free(d);
+    weights_locate(wp);   // same resolution as the load (package first), and it logs "weights: %s"
+    {   // the file must be whole before anything is overwritten: records (validated equal) end at or before it
+        uint64_t maxend = 0;
+        for (uint32_t i = 0; i < e->n_tensors; i++) {
+            uint64_t end = e->t[i].off + e->t[i].size;
+            if (end > maxend) maxend = end;
+        }
+        int f = open(wp, O_RDONLY);
+        if (f < 0) {
+            fail(e, "swap: cannot open %s", wp);
+            return -1;
+        }
+        off_t n = lseek(f, 0, SEEK_END);
+        close(f);
+        if (n < 0 || (uint64_t)n < maxend) {
+            fail(e, "swap: weights file too small for the record table (%lld of %llu)", (long long)n,
+                 (unsigned long long)maxend);
+            return -1;
+        }
+    }
+    // ---- point of no return: the model block takes the new weights ----
+    if (e->fd >= 0) {
+        close(e->fd);
+        e->fd = -1;
+    }
+    int f = open(wp, O_RDONLY);
+    uint64_t done = 0, chunk = 32ull << 20;
+    while (done < e->weights_size) {
+        uint64_t n = e->weights_size - done < chunk ? e->weights_size - done : chunk;
+        ssize_t r = read(f, (uint8_t*)(uintptr_t)e->model + done, n);
+        if (r <= 0) break;
+        done += r;
+    }
+    close(f);
+    if (done != e->weights_size) {
+        fail(e, "swap incomplete (%llu of %llu bytes)", (unsigned long long)done, (unsigned long long)e->weights_size);
+        engine_reset(e);
+        return -1;
+    }
+    if (e->head_idx && e->head_idx != e->n_tensors - 1 && e->ids) {   // the row -> token id table
+        const Tensor* t = &e->t[e->n_tensors - 1];
+        int fi = open(wp, O_RDONLY);
+        int ok = fi >= 0 && pread(fi, e->ids, (size_t)t->rows * 4, (off_t)t->off) == (ssize_t)t->rows * 4;
+        if (fi >= 0) close(fi);
+        if (!ok) {
+            fail(e, "swap: cannot read the vocabulary table");
+            engine_reset(e);
+            return -1;
+        }
+    }
+    if (e->cpu_embed) {   // the embedding rows: reopen the file, forget the cached rows
+        e->fd = open(wp, O_RDONLY);
+        if (e->fd < 0) {
+            fail(e, "swap: cannot reopen for the embedding rows");
+            engine_reset(e);
+            return -1;
+        }
+        for (int i = 0; i < ROW_CACHE; i++) e->row_tag[i] = -1;
+    }
+    memcpy(e->weights_path, wp, 129);
+    snprintf(e->model_name, sizeof(e->model_name), "%s", name);
+    engine_reset(e);
+    say("model swapped: %s (the conversation starts fresh)", name);
+    return 0;
+}
+
 #define TQ_TABLE \
     0xc02d6e45u, 0xc0039f58u, 0xbfce1f1du, 0xbfa0262eu, 0xbf705f2du, 0xbf2790a4u, 0xbec60879u, 0xbe030d12u, \
     0x3e030d12u, 0x3ec60879u, 0x3f2790a4u, 0x3f705f2du, 0x3fa0262eu, 0x3fce1f1du, 0x40039f58u, 0x402d6e45u, \
@@ -363,10 +587,37 @@ int engine_init(Engine* e, const char* dir, ProgressFn progress, void* user) {
     memcpy(e->init_state, init, sizeof(e->init_state));
     if (gpu_selftest(e)) return -1;   // before reading gigabytes of weights: does this console's GPU do the right thing?
 
-    if (e->tq && (e->head_dim != 256 || e->max_seq != 8192)) e->tq = 0;   // the kernels' shape (qwen35.cl MAX_SEQ)
+    if (e->tq && e->head_dim != 256) e->tq = 0;   // the kernels' shape (qwen35.cl); block size comes from the idx now
     // TurboQuant with a kernels.bin whose attn_tq.h takes the split argument: 16K of context, positions 8192.. in
     // kv_hi (while it is not lent to S3Gen)
-    if (e->tq && e->tq16) e->max_seq = 2 * 8192;
+    if (e->tq && e->tq16) e->max_seq = 2 * e->idx_max_seq;   // split design: two blocks of the kernels' MAX_SEQ
+    // Live ctx: the .idx's max_seq is a wish; what the GPU memory still left can hold decides. The kernels'
+    // ceiling stays (attn_tq split design = 16K with tq16, the fp16 kernels 8K). Slack: the MTP head (~234 MiB),
+    // the thinking slab (~50 MiB), and the activations/caches that come after this point (~20 MiB of margin).
+    {
+        uint32_t n_full = 0;
+        for (uint32_t i = 0; i < e->n_layers; i++) n_full += e->full_mask >> i & 1;
+        uint64_t per_pos = (uint64_t)e->rope_dim * 4;   // the RoPE row's share
+        if (e->tq) per_pos += (uint64_t)n_full * 2 * e->n_kv * (e->head_dim / 2 + 4);   // TQ 4-bit k + v + scales
+        else per_pos += (uint64_t)n_full * e->n_kv * e->head_dim * 4;                  // fp16 k + v
+        uint64_t kern_max = (e->tq && e->tq16) ? 2u * e->idx_max_seq : e->idx_max_seq;
+        uint64_t free = e->mem_size - e->next;
+        uint64_t slack = 304ull << 20;
+        if (free <= slack) {
+            fail(e, "no GPU room for any context (%u MiB left after the model)", (unsigned)(free >> 20));
+            return -1;
+        }
+        uint64_t fit = (free - slack) / per_pos;
+        fit -= fit % ATT_BLOCK;
+        if (fit > kern_max) fit = kern_max;
+        if (fit < e->max_seq) {
+            e->max_seq = (uint32_t)fit;
+            say("context trimmed to what fits: %u tokens (%u MiB left)", e->max_seq, (unsigned)(free >> 20));
+        } else if (fit > e->max_seq) {
+            e->max_seq = (uint32_t)fit;
+            say("context grown to what fits: %u tokens (%u MiB left)", e->max_seq, (unsigned)(free >> 20));
+        }
+    }
     // RoPE table: [max_seq][rope_dim] = cos of the first half, then sin (RoPE on the first rope_dim dims of a head)
     uint32_t half = e->rope_dim / 2;
     e->rope = gpu_alloc(e, (uint64_t)e->max_seq * e->rope_dim * 4);
@@ -399,16 +650,16 @@ int engine_init(Engine* e, const char* dir, ProgressFn progress, void* user) {
         // positions 8192.. of each layer are in kv_hi at the same offset (tq_split bytes from the first block):
         // lending it shortens the context to 8192 (lend_ctx); with 8K, lending it leaves the context whole.
         static const uint32_t tab[40] = {TQ_TABLE};
-        uint64_t kb = (uint64_t)e->n_kv * 8192 * (e->head_dim / 2 + 4), n_full = 0;
+        uint64_t kb = (uint64_t)e->n_kv * e->idx_max_seq * (e->head_dim / 2 + 4), n_full = 0;
         for (uint32_t i = 0; i < e->n_layers; i++) n_full += e->full_mask >> i & 1;
         uint64_t all = gpu_alloc(e, n_full * 2 * kb);
-        e->kv_split = n_full * (4096ull * e->n_kv * e->head_dim * 2 + 4096ull * e->n_kv * (e->head_dim + 4));
+        e->kv_split = n_full * ((e->idx_max_seq / 2) * e->n_kv * e->head_dim * 2 + (e->idx_max_seq / 2) * e->n_kv * (e->head_dim + 4));
         e->kv_hi = e->kv_split ? gpu_alloc(e, e->kv_split) : 0;
         e->lend_ctx = e->max_seq;
         if (e->max_seq > 8192) {
             if (all && e->kv_hi && e->kv_split >= n_full * 2 * kb) {
                 e->tq_split = e->kv_hi - all;
-                e->lend_ctx = 8192;
+                e->lend_ctx = e->idx_max_seq;
             } else {
                 e->max_seq = 8192;   // (cannot happen: the block is 96.5 MiB, the second 8K takes 66)
             }
@@ -571,6 +822,12 @@ int engine_init(Engine* e, const char* dir, ProgressFn progress, void* user) {
     }
     mm_tune(e);   // the batched prompt's product kernels, fastest per shape
     swar_tune(e);
+    // with the speech models gone their GPU room is free again: the thinking turn keeps a slab of it
+    uint64_t ws = engine_state_size(e);
+    if (ws && ws < e->mem_size - e->next) {
+        e->ws_begin = gpu_alloc(e, ws);
+        if (e->ws_begin) e->ws_end = e->ws_begin + ws;
+    }
     engine_reset(e);
     return 0;
 }
@@ -1182,7 +1439,7 @@ int engine_run(Engine* e, const uint32_t* tokens, int n, int pos0, float tempera
     double gpu = 0.0;
     // 16K: positions past lend_ctx are in kv_hi, so S3Gen's weights, if they were kept there after voice mode, are
     // about to be overwritten (voice mode reads them again when it starts)
-    if (e->tq_split && pos0 + n > (int)e->lend_ctx && e->s3.loaded) e->s3.loaded = 0;
+    // (voice borrowing gone: nothing to unload past the lend point)
     int batched = e->pf && !e->pf_off && n >= 4;
 #ifdef GARLIC_SPEC
     if (spec_active(e)) batched = 1;   // (the MTP head needs the pairs of every position: engine_spec.inc)
@@ -1375,6 +1632,7 @@ static void swar_tune(Engine* e) {
 // Mel features on the CPU, encoder on the GPU in one submission, then the TDT greedy loop, one GPU step per decision
 // (prediction network when a token was emitted, joint, argmax).
 
+#if 0  // speech removed 2026-11-22
 static const AsrTensor* at(Engine* e, const char* name) {
     for (uint32_t i = 0; i < e->asr.nt; i++)
         if (!strcmp(e->asr.t[i].name, name)) return &e->asr.t[i];
@@ -1704,6 +1962,7 @@ int asr_transcribe(Engine* e, const float* audio, int n, char* text, int max) {
 // 32 MiB copy inside it. Logs everything with say() (main.c).
 void say(const char* fmt, ...);
 
+#endif
 int engine_flex_test(Engine* e) {
     size_t avail = 0;
     ((int32_t(*)(size_t*))sceKernelAvailableFlexibleMemorySize)(&avail);
@@ -1760,6 +2019,7 @@ int engine_flex_test(Engine* e) {
 // The memory itself stays mapped: Python borrows it (asr_lent: its heap and its thread's stack) and the weights are
 // read back into it afterwards. Given back to the system, it would have to be mapped again, and the 338 MiB might no
 // longer be free.
+#if 0  // speech removed 2026-11-22
 void asr_release(Engine* e) {
     Asr* a = &e->asr;
     if (!a->flex_len || a->unloaded) return;
@@ -1805,6 +2065,7 @@ int asr_reload(Engine* e) {
 
 #include "engine_t3.inc"
 #include "engine_s3g.inc"
+#endif
 
 #ifdef GARLIC_SPEC
 #include "engine_spec.inc"

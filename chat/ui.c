@@ -1749,10 +1749,9 @@ void draw_chat(ChatView* v) {
     Hint h[8];
     int n = 0;
     if (v->generating) h[n++] = (Hint){BTN_CIRCLE, S_STOP};
-    else h[n++] = (Hint){BTN_CROSS, S_WRITE}, h[n++] = (Hint){BTN_SQUARE, S_TALK_HOLD};
+    else h[n++] = (Hint){BTN_CROSS, S_WRITE};   // (talk hold gone: no dictation)
     h[n++] = (Hint){BTN_TRIANGLE, S_NEW_CHAT};
     if (n_msgs) h[n++] = (Hint){BTN_UPDOWN, S_SCROLL};
-    if (!v->generating) h[n++] = (Hint){BTN_L1, S_VOICE_MODE};
     if (v->can_run && !v->generating) h[n++] = (Hint){BTN_R1, S_PY_RUN};
     char right[64];
     snprintf(right, sizeof(right), "%s %.1f", tr(S_TEMPERATURE), v->temperature);
@@ -1771,9 +1770,8 @@ void draw_chat(ChatView* v) {
     }
     draw_footer(h, n, right);
     footer_extra = 0;
-    int rx = SCREEN_W - 72 - str_width(&font_small, right) - 18;   // L2 / R2 next to the temperature
-    int w2 = draw_btn(BTN_R2, rx - 50, SCREEN_H - FOOTER_H / 2);
-    draw_btn(BTN_L2, rx - 50 - w2 - 8, SCREEN_H - FOOTER_H / 2);
+    int rx = SCREEN_W - 72 - str_width(&font_small, right) - 18;
+    draw_btn(BTN_R2, rx - 50, SCREEN_H - FOOTER_H / 2);   // (L2 glyph gone: nothing to dictate)
     draw_toast(v->toast, v->toast_alpha, 0);
 }
 
@@ -1804,7 +1802,7 @@ void draw_loading(float frac, const char* what) {
     char line_[160];
     snprintf(line_, sizeof(line_), "%s…  %d %%", what, (int)(clamp01(frac) * 100));
     draw_center(&font_small, cx, y + 30, line_, C_TEXT_DIM);
-    draw_center(&font_small, cx, SCREEN_H - 90, "Qwen3.5  ·  Parakeet  ·  Chatterbox", C_TEXT_MUTED);
+    draw_center(&font_small, cx, SCREEN_H - 90, "Qwen3.5  ·  TurboQuant  ·  32K ctx", C_TEXT_MUTED);
 }
 
 void draw_error(const char* what) {
@@ -2061,12 +2059,12 @@ void draw_keyboard(const Kb* kb, const char* text, double time) {
             for (int k = 0; k < KB_COLS; k++)
                 if (k == 0 || strcmp(kb_key(kb, r, k), kb_key(kb, r, k - 1))) kb_draw_key(kb, r, k, x0, y0, 0);
         const Hint h_letters[] = {{BTN_CROSS, S_KB_TYPE}, {BTN_SQUARE, S_KB_DELETE}, {BTN_TRIANGLE, S_KB_SPACE},
-                                  {BTN_L1, S_KB_SHIFT},   {BTN_R1, S_KB_EMOJI},      {BTN_L2, S_KB_DICTATE},
+                                  {BTN_L1, S_KB_SHIFT},   {BTN_R1, S_KB_EMOJI},
                                   {BTN_R2, S_KB_SEND},    {BTN_CIRCLE, S_KB_CLOSE}};
         const Hint h_emoji[] = {{BTN_CROSS, S_KB_TYPE}, {BTN_SQUARE, S_KB_DELETE}, {BTN_TRIANGLE, S_KB_SPACE},
                                 {BTN_R1, S_KB_LETTERS}, {BTN_R2, S_KB_SEND},      {BTN_CIRCLE, S_KB_CLOSE}};
         if (kb->page) draw_footer(h_emoji, 6, emoji_titles[ui_lang][kb->page - 1]);
-        else draw_footer(h_letters, 8, NULL);
+        else draw_footer(h_letters, 7, NULL);
         if (kb_cache) {
             memcpy(kb_cache, back, SCREEN_W * SCREEN_H * 4);
             kb_cache_sig = sig;
@@ -2080,6 +2078,7 @@ void draw_keyboard(const Kb* kb, const char* text, double time) {
     draw_field(x0, y, KEYS_W, text, time);
 }
 
+#if 0  // voice screens removed 2026-11-22
 // ---- voice -------------------------------------------------------------------------------------------------------
 
 static void mic_icon(float cx, float cy, float s, uint32_t col) {   // s = 1: about 60 px tall
@@ -2148,5 +2147,8 @@ void draw_confirm(const char* text) {
     draw_footer(hh, 4, NULL);
 }
 
+#endif
 #include "ui_run.inc"
+#if 0  // voice ui gone 2026-11-22
 #include "ui_voice.inc"
+#endif

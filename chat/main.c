@@ -38,7 +38,11 @@
 #define IM_END eng.im_end
 #define THINK 248068u           // Qwen3.5 <think> and </think>: an empty block = answer without thinking
 #define THINK_END 248069u
-#define MODEL_NAME (eng.qwen35 ? (eng.hidden >= 4096 ? "Qwen3.5-9B" : "Qwen3.5-4B") : "Qwen3-4B")
+// Swap-neutral label. The weights on /data can be changed under the app (see the engine log
+// line "weights:"), and the id it advertises must NOT follow that change: clients on the other
+// machines (OpenWebUI, the LAN tools) are configured for one model name and stay working across
+// swaps. This build is the 9B one, so it always says 9B even when another 9B-class set is loaded.
+#define MODEL_NAME "Qwen3.5-9B"
 #define MAX_REPLY 3000
 // One log per app (so that opening the other app does not lose this one's log), and the one before it
 #if defined(GARLIC_4B)
@@ -296,6 +300,7 @@ static uint32_t read_buttons(void) {
 // ---- state -------------------------------------------------------------------------------------------------------
 
 static Engine eng;
+static volatile int api_break;   // set by a model swap: the next API request starts the conversation fresh
 static Tokenizer tok;
 static ChatView view;
 static int pos, generating, need_close, reply_tokens, user_id;
@@ -308,6 +313,9 @@ static const char* toast_text;
 static int in_voice_mode;   // the voice mode screen is showing (its own thread draws it, see vs_main)
 static char api_chip[48];   // the API's label in the header while it is on ("" = off), see api_toggle
 static int api_busy;        // the model is answering an API request (api_run.inc)
+Engine* engine_ptr(void) { return &eng; }
+int api_is_busy(void) { return api_busy; }
+void api_break_set(void) { api_break = 1; }
 static void show_voice(int state);
 static void tts_new_reply(void);
 static void vs_publish(int think, int listen, float level);
@@ -344,7 +352,7 @@ static int code_msg(void) {
 }
 
 static void view_update(void) {
-    view.model = MODEL_NAME;
+    view.model = eng.model_name[0] ? eng.model_name : MODEL_NAME;   // follows the loaded model, and swaps
     view.pos = pos;
     view.max_seq = (int)eng.max_seq;
     view.can_run = !generating && code_msg() >= 0;
@@ -492,7 +500,7 @@ static void loading(void* user, float frac, const char* what) {
 
 static void show_error(const char* what) {
     say("fatal: %s", what);
-    vs_stop();   // (the voice screen's thread no longer draws)
+    // (no voice screen to stop)
     ts_stop();
     for (;;) {
         draw_error(what);
@@ -527,7 +535,7 @@ static void think_config(void) {
         if (c >= 64 && c <= 4096) think_cap = c;
     }
     free(f);
-    uint64_t need = engine_state_size(&eng), have = eng.asr.ws_end ? eng.asr.ws_end - eng.asr.ws_begin : 0;
+    uint64_t need = engine_state_size(&eng), have = eng.ws_end ? eng.ws_end - eng.ws_begin : 0;
     say("thinking (R3): up to %d tokens; the state copy takes %.2f of the %.2f MiB of dictation work memory%s", think_cap,
         need / 1048576.0, have / 1048576.0, need <= have ? "" : ": NO ROOM, the reasoning will stay in the history");
 }
@@ -539,9 +547,9 @@ static void think_toggle(void) {
 
 static int think_save(void) {
     uint64_t need = engine_state_size(&eng);
-    if (!eng.asr.ws_end || eng.asr.ws_end - eng.asr.ws_begin < need) return 0;
+    if (!eng.ws_end || eng.ws_end - eng.ws_begin < need) return 0;
     double t0 = now();
-    if (engine_state_copy(&eng, eng.asr.ws_begin, 1)) {
+    if (engine_state_copy(&eng, eng.ws_begin, 1)) {
         say("thinking: state copy failed (%s): the reasoning stays in the history", eng.error);
         return 0;
     }
@@ -636,7 +644,7 @@ static void think_finish(void) {
     }
     think_saved = 0;
     double t0 = now();
-    if (engine_state_copy(&eng, eng.asr.ws_begin, 0)) show_error(eng.error);
+    if (engine_state_copy(&eng, eng.ws_begin, 0)) show_error(eng.error);
     say("thinking: reasoning taken out of the history: back to position %d (from %d) in %.1f ms; %d tokens to read again",
         think_pos0, pos, (now() - t0) * 1e3, hist_n);
     pos = think_pos0;
@@ -793,8 +801,8 @@ static void start_turn(const char* user_text) {
 // must have them all. The prompt's ids and the logits after it go to /data/garlic_kvtest_<tokens>.bin, to compare
 // with a reference.
 static void kv_case(int three) {
-    static uint32_t ids[16384];
-    int n = 0, max = 16384;
+    static uint32_t ids[24576];
+    int n = 0, max = 24576;
     ids[n++] = IM_START;
     n = encode_into(ids, n, max, "user\nLee este texto con atención. El número secreto es 7351.\n");
     const char* filler = "La lluvia caía despacio sobre los tejados del pueblo mientras los vecinos conversaban en la plaza "
@@ -1128,6 +1136,7 @@ typedef void (*DrawUnder)(void);
 // says why).
 static void asr_wait(void);
 
+#if 0  // dictation removed 2026-11-22
 static int voice_to_text(uint32_t button, DrawUnder under, char* text, int max) {
     text[0] = 0;
     asr_wait();   // (after a Python program the dictation weights are read back first)
@@ -1221,6 +1230,7 @@ static int voice_to_text(uint32_t button, DrawUnder under, char* text, int max) 
     }
     return 1;
 }
+#endif
 
 // ---- keyboard ----------------------------------------------------------------------------------------------------
 
@@ -1273,14 +1283,7 @@ static int keyboard_ex(char* out, int max, int keep, int over_current) {
         if (pressed & ORBIS_PAD_BUTTON_L1) kb.shift = !kb.shift;
         if (pressed & ORBIS_PAD_BUTTON_R1) kb_toggle_emoji(&kb);
         if (pressed & ORBIS_PAD_BUTTON_R2) return out[0] != 0;
-        if (pressed & ORBIS_PAD_BUTTON_L2) {   // dictation: hold L2 and speak, the text is added
-            static char spoken[2048];
-            if (voice_to_text(ORBIS_PAD_BUTTON_L2, draw_kb_under, spoken, sizeof(spoken))) {
-                if (out[0] && out[strlen(out) - 1] != ' ') kb_append(out, max, " ");
-                kb_append(out, max, spoken);
-            }
-            prev = read_buttons();
-        }
+        // (L2 dictation gone: the keyboard takes keys only)
         if ((pressed & ORBIS_PAD_BUTTON_CROSS) && kb_press(&kb, out, max)) return out[0] != 0;
         draw_keyboard(&kb, out, now());
         if (toast_until > now()) {   // a dictation problem: show it over the keyboard too
@@ -1488,6 +1491,7 @@ static void run_python_once(void) {
 static OrbisPthread asr_th;
 static volatile int asr_th_busy, asr_th_made;
 
+#if 0  // dictation weights gone 2026-11-22
 static void* asr_reload_main(void* arg) {
     (void)arg;
     double t0 = now();
@@ -1517,10 +1521,9 @@ static void asr_wait(void) {
     if (asr_th_made) scePthreadJoin(asr_th, NULL), asr_th_made = 0;
 }
 
+#endif
 static void run_python(void) {
-    asr_wait();   // (a reload still running from the last program)
-    asr_release(&eng);
-    py_lent = (uint8_t*)asr_lent(&eng, &py_lent_size);
+    py_lent = NULL;   // (no dictation weights to lend into)
     size_t flex = 0;
     ((int32_t(*)(size_t*))sceKernelAvailableFlexibleMemorySize)(&flex);
     if (py_lent)
@@ -1528,9 +1531,9 @@ static void run_python(void) {
             (unsigned)(py_lent_size >> 20), (unsigned)(flex >> 20));
     run_python_once();
     py_lent = NULL, py_lent_size = 0;
-    asr_reload_bg();   // (it first gives back the screen copies the run may have taken)
 }
 
+#if 0  // voice mode gone 2026-11-22
 // ---- voice mode: hold Square, talk, Garlic answers; only its words are on screen -----------------------------------
 
 #include "voice_tts.inc"
@@ -1665,14 +1668,16 @@ static void show_voice(int state) { vs_publish(state == VM_THINK, 0, 0); }
 static int spec_lent;
 
 static void spec_lend(void) {
-    if (spec_lent || !eng.t3.ready) return;
+    if (spec_lent) return;
     double t0 = now();
-    if (spec_load(&eng, eng.t3.model, eng.t3.gpu_size, pos) == 0) {   // (it follows the conversation from here)
+    if (spec_load(&eng, 0, 0, pos) == 0) {   // (it follows the conversation from here)
         spec_lent = 1;
-        say("spec: MTP head in T3's memory in %.2f s (following the conversation from position %d)", now() - t0, pos);
+        say("spec: MTP head in its own memory in %.2f s (following the conversation from position %d)", now() - t0, pos);
     }
 }
 #endif
+
+
 
 static void voice_mode(void) {
     in_voice_mode = 1;
@@ -1766,6 +1771,21 @@ static void push_to_talk(void) {
         }
     }
 }
+#endif
+
+#ifdef GARLIC_SPEC
+// The MTP head no longer borrows T3’s memory (it is gone): the head gets a GPU block of its own.
+static int spec_lent;
+
+static void spec_lend(void) {
+    if (spec_lent) return;
+    double t0 = now();
+    if (spec_load(&eng, 0, 0, pos) == 0) {   // (it follows the conversation from here)
+        spec_lent = 1;
+        say("spec: MTP head in its own memory in %.2f s (following the conversation from position %d)", now() - t0, pos);
+    }
+}
+#endif
 
 // The console this runs on, first thing in the log: firmware, PS4 Pro or not, memory. Garlic is only tested on one
 // console (FW 11.52); with this line a log from any other one says what it was.
@@ -1804,7 +1824,7 @@ static void api_label(void) {
 static void api_config(void) {
     size_t sz = 0;
     char* f = (char*)read_all(API_FILE, &sz);
-    int on = f && sz && f[0] == '1';
+    int on = !f || !sz || f[0] == '1';   // auto-on: only a written 0 turns it off
     free(f);
     if (on) api_enable(1);
     api_label();
@@ -1917,17 +1937,7 @@ int main(void) {
     say("language model ready; GPU memory used %u of %u MiB; context cache %s, %u tokens (%u while voice mode "
         "borrows %u MiB)", (unsigned)(eng.next >> 20), (unsigned)(eng.mem_size >> 20),
         eng.tq ? "TurboQuant 4-bit" : "fp16 k + int8 v", eng.max_seq, eng.lend_ctx, (unsigned)(eng.kv_split >> 20));
-    if (t3_init(&eng, ASSETS) == 0) {   // text to speech, first half (Chatterbox T3)
-        say("T3 ready; GPU memory used %u of %u MiB", (unsigned)(eng.next >> 20), (unsigned)(eng.mem_size >> 20));
-    } else {
-        say("T3 not loaded: %s", eng.error);
-    }
-    loading((void*)tr(S_LOADING_VOICE), 0.99f, NULL);
-    if (asr_init(&eng, ASSETS) == 0)
-        say("speech to text ready: up to %u s of audio", eng.asr.max_frames * 8 / 100);
-    else
-        say("speech to text not available (missing or no GPU memory left)");
-    size_t flex0 = 0;   // system memory left (the 9B's dictation weights live there; Python borrows them)
+    size_t flex0 = 0;   // system memory left (Python borrows what is free)
     ((int32_t(*)(size_t*))sceKernelAvailableFlexibleMemorySize)(&flex0);
     say("GPU memory used: %u of %u MiB; system RAM free: %u MiB", (unsigned)(eng.next >> 20),
         (unsigned)(eng.mem_size >> 20), (unsigned)(flex0 >> 20));
@@ -1936,13 +1946,9 @@ int main(void) {
     else say("spec: no MTP head (mtp.idx, the q4s model or a kernel missing)");
 #endif
     kv_split_test();
-    tts_boot();
-    size_t flex1 = 0;
-    ((int32_t(*)(size_t*))sceKernelAvailableFlexibleMemorySize)(&flex1);
-    say("voice %s; system RAM free: %u MiB", tts_ready ? "ready" : "not available", (unsigned)(flex1 >> 20));
     view.temperature = 0.7f;
     think_config();
-    api_set_model(MODEL_NAME);
+    api_set_model(eng.model_name[0] ? eng.model_name : MODEL_NAME);   // the boot's pick, if garlic_model.txt chose one
     api_config();   // the OpenAI-compatible API (api.h), if it was left on; its jobs run in the loop below
 
     uint32_t prev = 0;
@@ -1969,13 +1975,13 @@ int main(void) {
             }
             prev = read_buttons();
         } else if (pressed & ORBIS_PAD_BUTTON_L1) {
-            voice_mode();
+            // (voice mode gone)
             prev = read_buttons();
         } else if ((pressed & ORBIS_PAD_BUTTON_R1) && code_msg() >= 0) {
             run_python();
             prev = read_buttons();
         } else if (pressed & ORBIS_PAD_BUTTON_SQUARE) {
-            push_to_talk();
+            // (dictation gone)
             prev = read_buttons();
         } else if (pressed & ORBIS_PAD_BUTTON_TRIANGLE) {
             msgs_clear();

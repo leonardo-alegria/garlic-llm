@@ -28,7 +28,10 @@ else:
     REMOTE = "/data/pkg/Garlic-LLM.pkg"
 FULL = "--full" in sys.argv
 # the weights of the all-in-one package (the names the .idx files give, see weights_locate)
-FULL_MODELS = (["qwen3.5-4b-q4i.bin"] if "--4b" in sys.argv else ["qwen3.5-9b-q4s.bin", "qwen3.5-9b-mtp.bin"]) +     ["parakeet-v3-q4i.bin", "chatterbox-t3.bin", "chatterbox-s3gen-mf.bin"]
+# the speech weights are opt-in now: text-only is the default (--speech adds them back)
+FULL_MODELS = ["qwen3.5-4b-q4i.bin"] if "--4b" in sys.argv else ["qwen3.5-9b-q4s.bin", "qwen3.5-9b-mtp.bin"]
+if "--speech" in sys.argv:
+    FULL_MODELS += ["parakeet-v3-q4i.bin", "chatterbox-t3.bin", "chatterbox-s3gen-mf.bin"]
 CONTENT_ID = f"IV0000-{TITLE_ID}_00-PS4LOCALAICHAT{SUFFIX}"
 SOURCES = sorted((ROOT / "chat").glob("*.c"))
 MP = ROOT / "chat" / "py" / "mp"

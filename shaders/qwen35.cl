@@ -5,7 +5,7 @@
 
 #define HEAD_DIM 256
 #define ROPE_DIM 64
-#define MAX_SEQ 8192
+#define MAX_SEQ 16384
 #define V_INT8              // value cache in int8 + a scale per position and kv head (attn.h)
 #define ATTN_SPLIT          // the cache in two halves (attn.h): voice mode lends the second one (chat/engine.c)
 

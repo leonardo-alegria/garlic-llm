@@ -168,6 +168,12 @@ int spec_load(Engine* e, uint64_t base, uint64_t size, int start) {
     Spec* s = &g_spec;
     if (!s->idx_ok) return -1;
     s->ready = s->on = s->drafted = 0;
+    if (!base) {   // no T3 memory to borrow: the head gets a block of its own
+        uint64_t want = spec_layout(e, 0);
+        base = gpu_alloc(e, want);
+        if (!base) { say("spec: no GPU memory left for the MTP head (%u MiB)", (unsigned)(want >> 20)); return -1; }
+        size = want;
+    }
     uint64_t need = spec_layout(e, base);
     if (need > size) {
         say("spec: the MTP head needs %u MiB, the block has %u", (unsigned)(need >> 20), (unsigned)(size >> 20));
@@ -566,21 +572,6 @@ void spec_stats_reset(void) {
 
 // The head's carry (h at the position before the next token) goes with the DeltaNet state ("Pensar"): 16 KiB.
 uint64_t spec_carry(void) { return g_spec.ready ? g_spec.Hc : 0; }
-
-// T3's weights read again into their memory (the head had borrowed it): ~280 MiB from the disk.
-int t3_reload(Engine* e) {
-    T3* t = &e->t3;
-    if (!t->ready || t->fd < 0) return -1;
-    uint64_t done = 0;
-    while (done < t->gpu_size) {
-        uint64_t n = t->gpu_size - done < (32ull << 20) ? t->gpu_size - done : 32ull << 20;
-        ssize_t r = pread(t->fd, (uint8_t*)(uintptr_t)t->model + done, n, (off_t)done);
-        if (r <= 0) break;
-        done += r;
-    }
-    __asm__ volatile("sfence" ::: "memory");
-    return done == t->gpu_size ? 0 : -1;
-}
 
 // The draft length cap (0 = the head off); k < 0 leaves it. Returns the previous one.
 int spec_kmax(int k) {

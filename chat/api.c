@@ -3,8 +3,16 @@
 // The sockets are the console's sceNet calls, declared here as the OpenOrbis headers do not have them all.
 // Nothing here runs until api_enable(1): no network library, no socket, no thread.
 #include "api.h"
+#include "engine.h"   // the Engine type, for the model swap endpoint
 
 #include <stdint.h>
+#include <fcntl.h>    // open/O_RDONLY for the .idx presence check in models_json
+
+// main.c owns the model and the API's busy state; this file is the server side of both.
+Engine* engine_ptr(void);
+int api_is_busy(void);
+void api_break_set(void);
+int engine_swap(Engine* e, const char* name);
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -177,6 +185,107 @@ static void serve_chat(int fd, HttpRequest* req) {
     free(job);
 }
 
+// The models this engine can serve now: /data/garlic.manifest.txt lines "<name> [idx path]"; a name is
+// listed only while its .idx is on the HDD. The loaded one is named in "loaded" (paired with the log's
+// weights: line — the id alone is never evidence).
+static void models_json(Sb* out) {
+    const char* loaded = engine_ptr() ? engine_ptr()->model_name : "";
+    if (!loaded[0]) loaded = api_model();
+    char names[24][64];
+    int nn = 0, li = -1;
+    size_t fs;
+    char* mf = (char*)read_all("/data/garlic.manifest.txt", &fs);
+    if (mf && fs) {
+        char* p = mf;
+        while ((size_t)(p - mf) < fs && nn < 24) {
+            char* q = p;
+            while ((size_t)(q - mf) < fs && *q != '\n') q++;
+            char* sp = p;
+            while (sp < q && *sp != ' ') sp++;
+            size_t nlen = (size_t)(sp - p);
+            if (nlen > 0 && nlen < 64) {
+                char nm[64];
+                memcpy(nm, p, nlen);
+                nm[nlen] = 0;
+                int bad = 0;
+                for (size_t i = 0; i < nlen; i++)
+                    if (nm[i] <= 32 || nm[i] == '/') bad = 1;
+                if (!bad) {
+                    char idxp[256];
+                    char* path2 = sp < q ? sp + 1 : NULL;
+                    while (path2 && (*path2 == ' ' || *path2 == '\r')) path2++;
+                    if (path2 && *path2 == '/' && (size_t)(q - path2) < 250) {
+                        size_t l = (size_t)(q - path2);
+                        while (l && (path2[l - 1] == ' ' || path2[l - 1] == '\r')) l--;
+                        memcpy(idxp, path2, l);
+                        idxp[l] = 0;
+                    } else snprintf(idxp, sizeof(idxp), "/data/%s.idx", nm);
+                    int vf = open(idxp, O_RDONLY);
+                    if (vf >= 0) {
+                        close(vf);
+                        snprintf(names[nn], 64, "%s", nm);
+                        if (!strcmp(names[nn], loaded)) li = nn;
+                        nn++;
+                    }
+                }
+            }
+            p = q + 1;
+        }
+        free(mf);
+    }
+    sb_str(out, "{\"object\":\"list\",\"data\":[");
+    for (int i = 0; i < nn; i++) {
+        if (i) sb_str(out, ",");
+        sb_str(out, "{\"id\":");
+        sb_json_str(out, names[i], strlen(names[i]));
+        sb_str(out, ",\"object\":\"model\"}");
+    }
+    if (li < 0) {   // the loaded model belongs in its own list
+        if (nn) sb_str(out, ",");
+        sb_str(out, "{\"id\":");
+        sb_json_str(out, loaded, strlen(loaded));
+        sb_str(out, ",\"object\":\"model\"}");
+    }
+    sb_str(out, "],\"loaded\":");
+    sb_json_str(out, loaded, strlen(loaded));
+    sb_str(out, "}");
+}
+
+// {"name":"X"} from a request body into out (64 bytes); 1 = well formed, printable, 1..63 chars.
+static int swap_name(HttpRequest* req, char* out) {
+    if (!req->body || req->body_len < 8) return 0;
+    JNode* pool = malloc(sizeof(JNode) * API_MAX_NODES);
+    int ok = 0;
+    if (pool) {
+        int root = json_parse(req->body, req->body_len, pool, API_MAX_NODES);
+        if (root >= 0) {
+            int nm = json_get(pool, root, "name");
+            if (nm >= 0) {
+                Sb o;
+                sb_init(&o);
+                json_str_sb(pool, nm, &o);
+                if (!o.oom && o.n > 0 && o.n < 64) {
+                    int bad = 0;
+                    for (size_t i = 0; i < o.n; i++) {
+                        unsigned char c = (unsigned char)o.p[i];
+                        int good = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+                                   c == '.' || c == '_' || c == '-';
+                        if (!good) bad = 1;
+                    }
+                    if (!bad) {
+                        memcpy(out, o.p, o.n);
+                        out[o.n] = 0;
+                        ok = 1;
+                    }
+                }
+                sb_free(&o);
+            }
+        }
+        free(pool);
+    }
+    return ok;
+}
+
 static void handle(int fd) {
     struct {
         long sec, usec;
@@ -202,7 +311,7 @@ static void handle(int fd) {
     } else if (!strcmp(req.method, "GET") && (!strcmp(req.path, "/v1/models") || !strcmp(req.path, "/models"))) {
         Sb s;
         sb_init(&s);
-        api_json_models(&s, model_name, 0);
+        models_json(&s);
         reply(fd, 200, "OK", "application/json", s.p, s.n);
         sb_free(&s);
     } else if (!strcmp(req.method, "GET") && !strcmp(req.path, "/health")) {
@@ -217,6 +326,30 @@ static void handle(int fd) {
         serve_chat(fd, &req);
         free(buf);
         return;   // (serve_chat keeps the connection until the main loop has written the reply)
+    } else if (!strcmp(req.method, "POST") && !strcmp(req.path, "/v1/model")) {
+        char name[64];
+        if (swap_name(&req, name)) {
+            if (api_is_busy()) {
+                reply_json_error(fd, 409, "Conflict", "The model is answering a request; swap when it is idle.",
+                                 "invalid_request_error", "model_busy");
+            } else {
+                Engine* e = engine_ptr();
+                if (!engine_swap(e, name)) {
+                    api_break_set();
+                    api_set_model(name);
+                    char body[128];
+                    int bn = snprintf(body, sizeof(body), "{\"object\":\"model\",\"id\":\"%s\",\"swapped\":true}",
+                                      name);
+                    reply(fd, 200, "OK", "application/json", body, (size_t)bn);
+                } else {
+                    reply_json_error(fd, 500, "Internal Server Error", e->error, "invalid_request_error",
+                                     "swap_failed");
+                }
+            }
+        } else {
+            reply_json_error(fd, 400, "Bad Request", "Missing or malformed \"name\".", "invalid_request_error",
+                             "invalid_name");
+        }
     } else {
         reply_json_error(fd, 404, "Not Found", "No such endpoint.", "invalid_request_error", NULL);
     }
