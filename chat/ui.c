@@ -188,6 +188,19 @@ static const char* strings[N_STRINGS][N_LANGS] = {
                     "I answered an API request; starting a new conversation.",
                     "Respondi a uma requisição da API; começando uma nova conversa.",
                     "Ответил на запрос API; начинаю новый разговор."},
+    [S_MODEL_TITLE] = {"Elige un modelo", "Choose a model", "Escolha um modelo", "Выберите модель"},
+    [S_MODEL_BUILTIN] = {"Modelo incluido", "Built-in model", "Modelo incluído", "Встроенная модель"},
+    [S_MODEL_SELECT] = {"Elegir", "Choose", "Escolher", "Выбрать"},
+    [S_MODEL_START] = {"Iniciar", "Start", "Iniciar", "Запустить"},
+    [S_MODEL_BAD_TITLE] = {"No se puede usar este modelo", "This model can't be used",
+                           "Não é possível usar este modelo", "Эту модель нельзя использовать"},
+    [S_MODEL_BAD] = {"Sus archivos no coinciden con el modelo incluido o están incompletos.",
+                     "Its files don't match the built-in model, or they are incomplete.",
+                     "Seus arquivos não correspondem ao modelo incluído ou estão incompletos.",
+                     "Её файлы не совпадают со встроенной моделью или неполные."},
+    [S_MODEL_FALLBACK] = {"Se iniciará el modelo incluido.", "The built-in model will start instead.",
+                          "O modelo incluído será iniciado.", "Будет запущена встроенная модель."},
+    [S_MODEL_CONTINUE] = {"Continuar", "Continue", "Continuar", "Продолжить"},
 };
 
 const char* tr(StrId id) { return strings[id][ui_lang] ? strings[id][ui_lang] : strings[id][LANG_EN]; }
@@ -1816,6 +1829,59 @@ void draw_error(const char* what) {
     Layout* l = layout_get(&L, what, strlen(what), 1200, &PAL_AI, 1);
     draw_layout(l, cx - l->max_w / 2, y + font_big.line + 20);
     draw_center(&font_small, cx, y + font_big.line + 40 + l->height, tr(S_ERROR_HINT), C_TEXT_MUTED);
+}
+
+// ---- the models folder: which weights the model starts with (main.c model_choose) --------------------------------
+
+#define MODEL_ROW_W 920
+#define MODEL_ROW_H 96
+#define MODEL_ROW_GAP 14
+#define MODEL_ROWS 4   // rows on the screen at once; the list scrolls with the selection
+
+void draw_models(const char* const* names, const char* const* notes, int n, int sel) {
+    draw_background();
+    brand_block(150);
+    int cx = SCREEN_W / 2, y = 150 + logo_l.h + 28 + font_big.line + 30;
+    draw_center(&font, cx, y, tr(S_MODEL_TITLE), C_TEXT_DIM);
+    y += font.line + 26;
+    int top = sel < MODEL_ROWS ? 0 : sel - MODEL_ROWS + 1, x = cx - MODEL_ROW_W / 2;
+    for (int i = top; i < n && i < top + MODEL_ROWS; i++, y += MODEL_ROW_H + MODEL_ROW_GAP) {
+        int on = i == sel, cy = y + MODEL_ROW_H / 2;
+        rrect(x, y, MODEL_ROW_W, MODEL_ROW_H, 24, on ? C_SURFACE_HI : C_SURFACE, 255);
+        rrect_line(x, y, MODEL_ROW_W, MODEL_ROW_H, 24, on ? 2 : 1, on ? C_ACCENT_HI : C_LINE_HI, 255);
+        circle(x + 48, cy, 13, 2.0f, on ? C_ACCENT_HI : C_LINE_HI, 255);
+        if (on) circle(x + 48, cy, 7, 0, C_ACCENT_HI, 255);
+        set_clip(x + 84, y, x + MODEL_ROW_W - 28, y + MODEL_ROW_H);
+        int ty = y + (MODEL_ROW_H - font.line - font_small.line) / 2;
+        draw_str(&font, x + 84, ty, names[i], on ? 0xFFFFFF : C_TEXT);
+        draw_str(&font_small, x + 84, ty + font.line, notes[i], on ? C_TEXT_DIM : C_TEXT_MUTED);
+        no_clip();
+    }
+    char where[24];
+    snprintf(where, sizeof(where), "%d / %d", sel + 1, n);
+    const Hint h[] = {{BTN_UPDOWN, S_MODEL_SELECT}, {BTN_CROSS, S_MODEL_START}};
+    draw_footer(h, 2, n > MODEL_ROWS ? where : NULL);
+}
+
+void draw_model_bad(const char* name, const char* detail) {
+    draw_background();
+    brand_block(180);
+    int cx = SCREEN_W / 2, y = 180 + logo_l.h + 28 + font_big.line + 56;
+    draw_center(&font_big, cx, y, tr(S_MODEL_BAD_TITLE), 0xF2A65A);
+    y += font_big.line + 14;
+    draw_center(&font, cx, y, name, 0xFFFFFF);
+    y += font.line + 22;
+    static Layout* L;
+    Layout* l = layout_get(&L, tr(S_MODEL_BAD), strlen(tr(S_MODEL_BAD)), 1200, &PAL_AI, 1);
+    draw_layout(l, cx - l->max_w / 2, y);
+    y += l->height + 16;
+    if (detail && *detail) {
+        draw_center(&font_small, cx, y, detail, C_TEXT_MUTED);
+        y += font_small.line + 10;
+    }
+    draw_center(&font_small, cx, y, tr(S_MODEL_FALLBACK), C_TEXT_DIM);
+    const Hint h[] = {{BTN_CROSS, S_MODEL_CONTINUE}};
+    draw_footer(h, 1, NULL);
 }
 
 // ---- on-screen keyboard ----------------------------------------------------------------------------------------

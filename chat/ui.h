@@ -27,7 +27,9 @@ typedef enum {
     S_SYSTEM_PROMPT, S_LOCAL_GPU, S_PY_RUN, S_PY_EXIT, S_PY_CLICK, S_PY_RCLICK, S_PY_MOVE, S_PY_KEYS, S_PY_BACK,
     S_PY_AGAIN, S_PY_FIX, S_PY_DONE, S_PY_ERROR, S_PY_STOPPED, S_PY_STARTING, S_PY_FIX_MSG, S_PY_FIX_ASK, S_PY_INPUT, S_VOICE_MODE, S_THINKING, S_LISTENING_SHORT, S_VOICE_LOADING, S_VOICE_NO_TTS,
     S_THINK_OFF_HINT, S_THINK_ON_HINT, S_THINK_ON_TOAST, S_THINK_OFF_TOAST, S_THOUGHT, S_THINK_CUT, S_THINK_CHIP,
-    S_API_ON, S_API_OFF, S_API_FAILED, S_API_BUSY, S_API_DONE, N_STRINGS
+    S_API_ON, S_API_OFF, S_API_FAILED, S_API_BUSY, S_API_DONE,
+    S_MODEL_TITLE, S_MODEL_BUILTIN, S_MODEL_SELECT, S_MODEL_START, S_MODEL_BAD_TITLE, S_MODEL_BAD, S_MODEL_FALLBACK,
+    S_MODEL_CONTINUE, N_STRINGS
 } StrId;
 const char* tr(StrId id);
 
@@ -90,6 +92,10 @@ int ui_screen_pool_mb(void);
 void ui_free_caches(void);      // gives back the backdrop and keyboard copies (8 MB each); they return when needed
 void draw_loading(float frac, const char* what);
 void draw_error(const char* what);
+// The models folder (main.c): the list of models to start (names[0] is the built-in one), a smaller line under each
+// name (notes), sel selected; then, for a chosen model that cannot be used, its name and the file at fault (detail).
+void draw_models(const char* const* names, const char* const* notes, int n, int sel);
+void draw_model_bad(const char* name, const char* detail);
 void draw_toast(const char* text, float alpha, int bottom);   // bottom 0 = above the footer
 
 // ---- footer hints ----

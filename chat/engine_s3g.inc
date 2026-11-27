@@ -66,9 +66,23 @@ void s3g_voice(Engine* e, const char* lang) {
     if (!g->nvoice) return;
     const S3Voice* v = &g->voice[0];
     for (int i = 1; i < g->nvoice; i++)
-        if (!strncmp(g->voice[i].lang, lang, 2)) v = &g->voice[i];
+        if (g->voice[i].lang[0] && !strncmp(g->voice[i].lang, lang, 2)) v = &g->voice[i];
     g->np = v->np, g->nmel = v->nmel, g->ptok = v->ptok, g->pmel = v->pmel, g->gain = v->gain;
     memcpy(g->spk, v->spk, sizeof(g->spk));
+}
+
+int s3g_voice_named(Engine* e, const char* name) {
+    S3G* g = &e->s3;
+    if (!g->nvoice || !name || !name[0]) return 0;
+    for (int i = 0; i < g->nvoice; i++) {
+        if (!strcmp(g->voice[i].name, name)) {
+            const S3Voice* v = &g->voice[i];
+            g->np = v->np, g->nmel = v->nmel, g->ptok = v->ptok, g->pmel = v->pmel, g->gain = v->gain;
+            memcpy(g->spk, v->spk, sizeof(g->spk));
+            return 1;
+        }
+    }
+    return 0;
 }
 
 int s3g_init(Engine* e, const char* dir) {
@@ -111,14 +125,61 @@ int s3g_init(Engine* e, const char* dir) {
     // the voices: the built-in one, then the languages that have their own (the same speaker for the rest)
     snprintf(path, sizeof(path), "%s/s3g_voice.bin", dir);
     if (s3_read_voice(path, &g->voice[0])) return -1;
+    snprintf(g->voice[0].name, sizeof(g->voice[0].name), "default");
     g->nvoice = 1;
     static const char* langs[] = {"es", "pt", "ru", "it", "fr", "de", "en"};
-    for (int i = 0; i < 7 && g->nvoice < 8; i++) {
+    for (int i = 0; i < 7 && g->nvoice < 16; i++) {
         snprintf(path, sizeof(path), "%s/s3g_voice_%s.bin", dir, langs[i]);
         S3Voice* v = &g->voice[g->nvoice];
         if (s3_read_voice(path, v)) continue;
         snprintf(v->lang, sizeof(v->lang), "%s", langs[i]);
+        snprintf(v->name, sizeof(v->name), "%s", langs[i]);
         g->nvoice++;
+    }
+    // custom voices in /data/garlic/voices/*.bin (fallback: /data/garlic-llm/voices/*.bin)
+    static const char* vdirs[] = {"/data/garlic/voices", "/data/garlic-llm/voices"};
+    for (int di = 0; di < 2 && g->nvoice < 16; di++) {
+        int dfd = open(vdirs[di], O_RDONLY);
+        if (dfd < 0) continue;
+        char dbuf[2048];
+        for (;;) {
+            int nread = sceKernelGetdents(dfd, dbuf, sizeof(dbuf));
+            if (nread <= 0) break;
+            for (int off = 0; off < nread && g->nvoice < 16;) {
+                uint32_t d_fileno;
+                uint16_t d_reclen;
+                uint8_t d_type, d_namlen;
+                memcpy(&d_fileno, dbuf + off, 4);
+                memcpy(&d_reclen, dbuf + off + 4, 2);
+                d_type = (uint8_t)dbuf[off + 6];
+                d_namlen = (uint8_t)dbuf[off + 7];
+                (void)d_fileno;
+                (void)d_type;
+                if (d_reclen == 0) break;
+                const char* fn = dbuf + off + 8;
+                size_t fl = d_namlen;
+                if (fl > 4 && !memcmp(fn + fl - 4, ".bin", 4)) {
+                    char vname[32];
+                    size_t nl = fl - 4 < sizeof(vname) - 1 ? fl - 4 : sizeof(vname) - 1;
+                    memcpy(vname, fn, nl);
+                    vname[nl] = 0;
+                    int dup = 0;
+                    for (int k = 0; k < g->nvoice; k++)
+                        if (!strcmp(g->voice[k].name, vname)) dup = 1;
+                    if (!dup) {
+                        snprintf(path, sizeof(path), "%s/%.*s", vdirs[di], (int)fl, fn);
+                        S3Voice* v = &g->voice[g->nvoice];
+                        memset(v, 0, sizeof(*v));
+                        if (s3_read_voice(path, v) == 0) {
+                            snprintf(v->name, sizeof(v->name), "%s", vname);
+                            g->nvoice++;
+                        }
+                    }
+                }
+                off += d_reclen;
+            }
+        }
+        close(dfd);
     }
     s3g_voice(e, "");
     for (int i = 0; i < K3_N; i++)

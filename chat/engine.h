@@ -106,6 +106,7 @@ typedef struct {
 
 typedef struct {               // a voice: prompt speech tokens, prompt mel frames (2 per token), speaker vector
     char lang[4];               // "" = the built-in voice (assets/s3g_voice.bin), else assets/s3g_voice_<lang>.bin
+    char name[32];              // "default", "ru", or custom basename from /data/garlic/voices/<name>.bin
     uint32_t np, nmel;
     int32_t* ptok;
     float* pmel;
@@ -119,7 +120,7 @@ typedef struct {
     uint32_t nt;
     char path[129];
     uint64_t size;
-    S3Voice voice[8];           // [0] the built-in voice, then the languages that have their own (Russian)
+    S3Voice voice[16];          // [0] built-in, language voices, then custom /data/garlic/voices/*.bin
     int nvoice;
     uint32_t np, nmel;          // the voice in use (s3g_voice): prompt speech tokens, prompt mel frames, speaker vector
     int32_t* ptok;
@@ -142,6 +143,7 @@ typedef struct {
     float eps, rope_theta;
     // Qwen3.5 (model.idx "PMQ5"): Gated DeltaNet shape, partial RoPE, which layers are full attention
     int qwen35, neo;
+    int maple;              // model.idx "PMAP": Maple-Preview 20B MoE (chat/engine_maple.inc)
     uint32_t pf_rows;
     uint32_t n_kh, n_vh, dk, dv, rope_dim, full_mask, im_start, im_end;
     uint32_t* layer_base;   // index in t[] of each layer's first tensor (attn_norm)
@@ -163,7 +165,7 @@ typedef struct {
 
     // GPU-visible memory (Garlic): command buffer, kernel arguments, code, model, caches, activations
     uint8_t* mem;
-    uint64_t mem_size, next;
+    uint64_t mem_off, mem_size, next;
     uint32_t* dcb;
     uint32_t ndw, dcb_cap;
     uint8_t* kargs;
@@ -227,8 +229,17 @@ typedef struct {
 
 // Direct memory engine_init leaves to the system (MiB; main.c sets it before engine_init).
 extern int eng_margin_mb;
+#define GARLIC_MAPLE_ENGINE 1
+// The model chosen from the models folder (main.c, models.h), set before engine_init: the weights file model.idx
+// names is read from eng_model_dir instead of the package or /data, and the MTP head's (spec_init) from eng_mtp_dir.
+// NULL = the usual places.
+extern const char* eng_model_dir;
+extern const char* eng_mtp_dir;
+uint64_t engine_alloc(Engine* e, uint64_t size);
 // Reads model.idx and kernels.bin from assets_dir, reserves GPU memory and loads the weights file.
 int engine_init(Engine* e, const char* assets_dir, ProgressFn progress, void* user);
+// Releases GPU direct memory, flexible memory, file descriptors and heap allocations so another model can be loaded.
+void engine_unload(Engine* e);
 // Runs n tokens through the model starting at position pos0 and samples the token after the last one.
 // temperature 0 = greedy. Returns 0 and the sampled token in *next, or -1 with e->error set.
 // (n >= 4 goes through the layers in batches of up to 32 tokens, shaders/prefill.h, unless e->pf_off.)
@@ -268,6 +279,7 @@ int s3g_init(Engine* e, const char* assets_dir);
 // S3Gen's voice for a language ("ru", ...): its own if assets has one, else the built-in voice. Takes effect at the
 // next s3g_begin.
 void s3g_voice(Engine* e, const char* lang);
+int s3g_voice_named(Engine* e, const char* name);
 int s3g_load(Engine* e, uint64_t weights, uint64_t wsize, uint64_t scratch, uint64_t ssize);
 int s3g_begin(Engine* e, const uint16_t* tokens, int n, uint32_t seed);
 int s3g_step(Engine* e, float* out, int max);
